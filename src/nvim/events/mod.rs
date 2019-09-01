@@ -1,3 +1,6 @@
+pub mod parse;
+pub mod grid;
+
 #[derive(Debug)]
 pub struct Color([f64; 3]);
 
@@ -38,24 +41,12 @@ pub enum RedrawEvent {
         bg: Color,
         sp: Color,
     },
-    HlAttrDefine(Vec<HighlightAttr>),
-    GridLine(Vec<GridLine>),
+    HlAttrDefine(Vec<grid::HighlightAttr>),
+    GridLine(Vec<grid::GridLine>),
     GridClear,
     GridDestroy,
-    GridCursorGoto {
-        grid: i32,
-        row: u32,
-        column: u32,
-    },
-    GridScroll {
-        grid: i32,
-        top: u32,
-        bottom: u32,
-        left: u32,
-        right: u32,
-        rows: u32,
-        columns: u32,
-    },
+    GridCursorGoto(grid::GridGoto),
+    GridScroll(grid::GridScroll),
 }
 
 #[derive(Debug)]
@@ -87,39 +78,4 @@ pub enum UiOption {
     GuiFont(String),
     GuiFontWide(String),
     LineSpace(i64),
-}
-
-#[derive(Debug, Default)]
-pub struct RgbAttr {
-    pub foreground: Option<Color>,
-    pub background: Option<Color>,
-    pub special: Option<Color>,
-
-    pub reverse: bool,
-    pub italic: bool,
-    pub bold: bool,
-    pub underline: bool,
-    pub undercurl: bool,
-}
-
-#[derive(Debug)]
-pub struct HighlightAttr {
-    pub id: i32,
-    pub rgb_attr: RgbAttr,
-    pub cterm_attr: RgbAttr,
-}
-
-#[derive(Debug)]
-pub struct GridLine {
-    pub grid: i32,
-    pub row: u32,
-    pub col_start: u32,
-    pub cells: Vec<GridCell>,
-}
-
-#[derive(Debug)]
-pub struct GridCell {
-    pub text: String,
-    pub hl_id: u64,
-    pub repeated: u64,
 }
