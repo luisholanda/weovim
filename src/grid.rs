@@ -118,9 +118,9 @@ impl Lines {
     }
 
     fn clear_cache(&mut self) {
-        self.cached_sections
-            .par_iter_mut()
-            .for_each(|cs| (*cs) = None);
+        for cs in &mut self.cached_sections {
+            (*cs) = None;
+        }
     }
 }
 
