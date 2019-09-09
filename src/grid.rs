@@ -72,18 +72,15 @@ impl Lines {
 
             unsafe {
                 // As rows != 0, src and dst will guaranteed be
-                // non-overlapping regions (src_idx > i).
+                // non-overlapping regions (src_idx != i).
                 let src_idx = (i as i64 + rows) as usize;
-                assert!(src_idx > i);
+                assert!(src_idx != i);
 
-                let src: *mut _ = &mut self.lines[src_idx].cells[left];
-                let dst: *mut _ = &mut self.lines[i].cells[left];
-
-                let src = src.add(left);
-                let dst = dst.add(left);
+                let dst = self.lines[i].cells.as_mut_ptr().add(left);
+                let src = self.lines[src_idx].cells.as_mut_ptr().add(left);
 
                 // Swap src[left..=right] with dst[left..=right]
-                std::ptr::swap_nonoverlapping(src, dst, right - left + 1);
+                std::ptr::swap_nonoverlapping(src, dst, right - left);
             }
         }
     }
