@@ -48,7 +48,9 @@ impl Lines {
     pub fn clear(&mut self) {
         self.clear_cache();
 
-        self.lines.par_iter_mut().for_each(Line::clear);
+        for line in &mut self.lines {
+            line.clear();
+        }
     }
 
     pub fn scroll(&mut self, reg: [usize; 4], rows: i64) {
