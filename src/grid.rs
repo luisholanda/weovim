@@ -40,10 +40,9 @@ impl Lines {
 
         self.lines
             .resize_with(rows, || Line::with_capacity(columns));
-
-        self.lines[..old_len]
-            .par_iter_mut()
-            .for_each(|line| line.resize(columns));
+        for line in &mut self.lines[..old_len] {
+            line.resize(columns);
+        }
     }
 
     pub fn clear(&mut self) {
@@ -94,8 +93,7 @@ impl Lines {
             }
         }
 
-        self
-            .cached_sections
+        self.cached_sections
             .iter()
             .flatten()
             .map(|cl| SectionedLine {
