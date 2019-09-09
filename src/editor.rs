@@ -64,7 +64,7 @@ impl Editor {
                         print!("{}", chr);
                     }
                 }
-                println!("");
+                println!();
             } else {
                 println!("{}", l.text);
             }

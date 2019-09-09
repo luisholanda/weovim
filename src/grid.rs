@@ -49,9 +49,7 @@ impl Lines {
     pub fn clear(&mut self) {
         self.clear_cache();
 
-        for line in &mut self.lines {
-            line.clear();
-        }
+        self.lines.par_iter_mut().for_each(Line::clear);
     }
 
     pub fn scroll(&mut self, reg: [usize; 4], rows: i64) {
@@ -120,9 +118,9 @@ impl Lines {
     }
 
     fn clear_cache(&mut self) {
-        for cs in &mut self.cached_sections {
-            cs.take();
-        }
+        self.cached_sections
+            .par_iter_mut()
+            .for_each(|cs| (*cs) = None);
     }
 }
 
