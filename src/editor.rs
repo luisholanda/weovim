@@ -1,6 +1,6 @@
 use crate::cursor::Cursor;
 use crate::grid::*;
-use crate::nvim::events::grid::{RgbAttr, HighlightAttr};
+use crate::nvim::events::grid::{HighlightAttr, RgbAttr};
 use crate::nvim::events::{ModeInfo, RedrawEvent};
 use crate::ui::Color;
 use std::collections::HashMap;
@@ -25,26 +25,22 @@ impl Editor {
             RedrawEvent::ModeInfoSet { mode_info, .. } => self.moodes = mode_info,
             RedrawEvent::ModeChange { index, .. } => {
                 self.current_mode = index;
-                self.cursor = self.cursor.change_shape(self.moodes[index].cursor_shape);
+                self.cursor.change_shape(self.moodes[index].cursor_shape);
             }
             RedrawEvent::Busy(busy) => self.nvim_busy = busy,
             RedrawEvent::Flush => return EventRes::Render,
-            RedrawEvent::DefaultColorSet { fg, bg, sp } => {
-                self.hl_groups.update_default(RgbAttr {
-                    foreground: Some(fg),
-                    background: Some(bg),
-                    special: Some(sp),
-                    ..RgbAttr::default()
-                })
-            }
+            RedrawEvent::DefaultColorSet { fg, bg, sp } => self.hl_groups.update_default(RgbAttr {
+                foreground: Some(fg),
+                background: Some(bg),
+                special: Some(sp),
+                ..RgbAttr::default()
+            }),
             RedrawEvent::HlAttrDefine(hls) => self.hl_groups.update(hls),
             RedrawEvent::GridLine(lines) => self.lines.update_lines(lines),
             RedrawEvent::GridClear => self.lines.clear(),
             RedrawEvent::GridDestroy => return EventRes::Destroy,
             RedrawEvent::GridResize { width, height, .. } => self.lines.resize(height, width),
-            RedrawEvent::GridCursorGoto(goto) => {
-                self.cursor = self.cursor.move_to(goto.row, goto.column)
-            }
+            RedrawEvent::GridCursorGoto(goto) => self.cursor.move_to(goto.row, goto.column),
             RedrawEvent::GridScroll(scl) => {
                 let reg = [scl.top, scl.bottom, scl.left, scl.right];
 
@@ -59,8 +55,19 @@ impl Editor {
     pub fn render(&mut self) {
         let text = self.lines.render(&self.hl_groups);
 
-        for l in text {
-            println!("{}", l.text);
+        for (i, l) in text.iter().enumerate() {
+            if i == self.cursor.row {
+                for (col, chr) in l.text.chars().enumerate() {
+                    if col == self.cursor.col {
+                        print!("\u{2588}");
+                    } else {
+                        print!("{}", chr);
+                    }
+                }
+                println!("");
+            } else {
+                println!("{}", l.text);
+            }
         }
     }
 }

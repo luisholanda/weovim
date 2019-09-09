@@ -1,4 +1,4 @@
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct Cursor {
     pub row: usize,
     pub col: usize,
@@ -6,17 +6,13 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    pub fn move_to(mut self, row: usize, col: usize) -> Self {
+    pub fn move_to(&mut self, row: usize, col: usize) {
         self.row = row;
         self.col = col;
-
-        self
     }
 
-    pub fn change_shape(mut self, shape: CursorShape) -> Self {
+    pub fn change_shape(&mut self, shape: CursorShape) {
         self.shape = shape;
-
-        self
     }
 }
 

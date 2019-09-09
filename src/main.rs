@@ -1,6 +1,5 @@
 mod cursor;
 mod editor;
-mod escaped;
 mod grid;
 mod nvim;
 mod ui;

@@ -1,5 +1,6 @@
 use crate::editor::HighlightGroups;
 use crate::nvim::events::grid::{GridLine, RgbAttr};
+use rayon::prelude::*;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Section<H> {
@@ -31,17 +32,18 @@ impl Lines {
         }
     }
 
-    pub fn resize(&mut self, rows: usize, colums: usize) {
+    pub fn resize(&mut self, rows: usize, columns: usize) {
         self.clear_cache();
         self.cached_sections.resize_with(rows, Option::default);
 
         let old_len = self.lines.len();
 
-        self.lines.resize_with(rows, || Line::with_capacity(colums));
+        self.lines
+            .resize_with(rows, || Line::with_capacity(columns));
 
-        for line in &mut self.lines[..old_len] {
-            line.resize(colums);
-        }
+        self.lines[..old_len]
+            .par_iter_mut()
+            .for_each(|line| line.resize(columns));
     }
 
     pub fn clear(&mut self) {
@@ -78,8 +80,8 @@ impl Lines {
                 let src: *mut _ = &mut self.lines[src_idx].cells[left];
                 let dst: *mut _ = &mut self.lines[i].cells[left];
 
-                let src = src.offset(left as isize);
-                let dst = dst.offset(left as isize);
+                let src = src.add(left);
+                let dst = dst.add(left);
 
                 // Swap src[left..=right] with dst[left..=right]
                 std::ptr::swap_nonoverlapping(src, dst, right - left + 1);
@@ -88,22 +90,33 @@ impl Lines {
     }
 
     pub fn render<'l>(&'l mut self, hl_groups: &'l HighlightGroups) -> RenderedLines<'l> {
-        for i in 0..self.lines.len() {
-            let cl = self.cached_sections[i]
-                .take()
-                .unwrap_or_else(|| self.lines[i].render());
+        let cached = std::mem::replace(
+            &mut self.cached_sections,
+            Vec::with_capacity(self.lines.len()),
+        );
 
-            self.cached_sections[i] = Some(cl);
-        }
+        cached
+            .into_par_iter()
+            .zip_eq(self.lines.par_iter())
+            .map(|(c, l)| Some(c.unwrap_or_else(|| l.render())))
+            .collect_into_vec(&mut self.cached_sections);
 
-        self.cached_sections.iter().flatten().map(|cl| SectionedLine {
-            text: cl.text.as_str(),
-            sections: cl.sections.iter().map(|s| Section {
-                hl: hl_groups.group(s.hl),
-                start: s.start,
-                end: s.end
-            }).collect()
-        }).collect()
+        self.cached_sections
+            .par_iter()
+            .flatten()
+            .map(|cl| SectionedLine {
+                text: cl.text.as_str(),
+                sections: cl
+                    .sections
+                    .iter()
+                    .map(|s| Section {
+                        hl: hl_groups.group(s.hl),
+                        start: s.start,
+                        end: s.end,
+                    })
+                    .collect(),
+            })
+            .collect()
     }
 
     fn clear_cache(&mut self) {
@@ -187,11 +200,7 @@ impl Line {
                         if c.hl_id == hl {
                             end += 1;
                         } else {
-                            sections.push(Section {
-                                hl,
-                                start,
-                                end,
-                            });
+                            sections.push(Section { hl, start, end });
 
                             start = end + 1;
                             end = start;
@@ -211,7 +220,7 @@ impl Line {
 
 enum Stride {
     Asc(usize, usize),
-    Desc(usize,usize),
+    Desc(usize, usize),
 }
 
 impl Iterator for Stride {
