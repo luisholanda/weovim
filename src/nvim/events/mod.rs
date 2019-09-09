@@ -1,18 +1,8 @@
-pub mod parse;
+use crate::cursor::CursorShape;
+use crate::ui::Color;
+
 pub mod grid;
-
-#[derive(Debug)]
-pub struct Color([f64; 3]);
-
-impl Color {
-    pub fn from_u64(v: u64) -> Self {
-        Color([
-            ((v >> 16) & 255) as f64 / 255f64,
-            ((v >> 8) & 255) as f64 / 255f64,
-            (v & 255) as f64 / 255f64,
-        ])
-    }
-}
+pub mod parse;
 
 #[derive(Debug)]
 pub enum RedrawEvent {
@@ -25,16 +15,16 @@ pub enum RedrawEvent {
     OptionSet(Vec<UiOption>),
     ModeChange {
         name: String,
-        index: i32,
+        index: usize,
     },
     Busy(bool),
     Flush,
 
     // Grid Events
     GridResize {
-        grid: i32,
-        width: u32,
-        height: u32,
+        grid: usize,
+        width: usize,
+        height: usize,
     },
     DefaultColorSet {
         fg: Color,
@@ -47,19 +37,6 @@ pub enum RedrawEvent {
     GridDestroy,
     GridCursorGoto(grid::GridGoto),
     GridScroll(grid::GridScroll),
-}
-
-#[derive(Debug)]
-pub enum CursorShape {
-    Block,
-    Horizontal,
-    Vertical,
-}
-
-impl Default for CursorShape {
-    fn default() -> Self {
-        Self::Block
-    }
 }
 
 #[derive(Debug, Default)]

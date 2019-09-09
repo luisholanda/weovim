@@ -1,6 +1,6 @@
-use neovim_lib::Value;
-use super::*;
 use super::grid::*;
+use super::*;
+use neovim_lib::Value;
 
 macro_rules! unwrap_array {
     ($v: expr) => {
@@ -29,6 +29,18 @@ macro_rules! unwrap_map {
     };
 }
 
+macro_rules! unwrap_usize {
+    ($v: expr) => {
+        match $v {
+            Value::Integer(ref i) => match i.as_u64() {
+                Some(u) => u as usize,
+                None => panic!("Expected usize found {}", i),
+            },
+            e => panic!("Expected number, received {}", e),
+        }
+    };
+}
+
 pub fn redrawcmd(mut args: Vec<Value>) -> Option<RedrawEvent> {
     let mut drain = args.drain(..);
 
@@ -43,9 +55,9 @@ pub fn redrawcmd(mut args: Vec<Value>) -> Option<RedrawEvent> {
         "grid_resize" => {
             let mut goto = unwrap_array!(drain.next()?);
 
-            let height = goto.pop()?.as_u64()? as u32;
-            let width = goto.pop()?.as_u64()? as u32;
-            let grid = goto.pop()?.as_i64()? as i32;
+            let height = unwrap_usize!(goto.pop()?);
+            let width = unwrap_usize!(goto.pop()?);
+            let grid = unwrap_usize!(goto.pop()?);
 
             Some(RedrawEvent::GridResize {
                 grid,
@@ -61,35 +73,31 @@ pub fn redrawcmd(mut args: Vec<Value>) -> Option<RedrawEvent> {
         "grid_cursor_goto" => {
             let mut goto = unwrap_array!(drain.next()?);
 
-            let column = goto.pop()?.as_u64()? as u32;
-            let row = goto.pop()?.as_u64()? as u32;
-            let grid = goto.pop()?.as_i64()? as i32;
+            let column = unwrap_usize!(goto.pop()?);
+            let row = unwrap_usize!(goto.pop()?);
+            let grid = unwrap_usize!(goto.pop()?);
 
-            Some(RedrawEvent::GridCursorGoto(GridGoto{
-                grid,
-                row,
-                column,
-            }))
+            Some(RedrawEvent::GridCursorGoto(GridGoto { grid, row, column }))
         }
         "grid_scroll" => {
             let mut goto = unwrap_array!(drain.next()?);
 
-            let columns = goto.pop()?.as_u64()? as u32;
-            let rows = goto.pop()?.as_u64()? as u32;
-            let right = goto.pop()?.as_u64()? as u32;
-            let left = goto.pop()?.as_u64()? as u32;
-            let bottom = goto.pop()?.as_u64()? as u32;
-            let top = goto.pop()?.as_u64()? as u32;
-            let grid = goto.pop()?.as_i64()? as i32;
+            let columns = unwrap_usize!(goto.pop()?);
+            let rows = goto.pop()?.as_i64()?;
+            let right = unwrap_usize!(goto.pop()?);
+            let left = unwrap_usize!(goto.pop()?);
+            let bottom = unwrap_usize!(goto.pop()?);
+            let top = unwrap_usize!(goto.pop()?);
+            let grid = unwrap_usize!(goto.pop()?);
 
-            Some(RedrawEvent::GridScroll(GridScroll{
+            Some(RedrawEvent::GridScroll(GridScroll {
                 grid,
                 top,
                 bottom,
                 left,
                 right,
                 rows,
-                columns
+                columns,
             }))
         }
         _ => None,
@@ -155,7 +163,7 @@ fn parse_uioptions(args: impl Iterator<Item = Value>) -> Option<RedrawEvent> {
 fn parse_mode_change(args: Vec<Value>) -> Option<RedrawEvent> {
     let mut args = args.into_iter();
     let name = unwrap_string!(args.next()?);
-    let index = args.next()?.as_i64()? as i32;
+    let index = unwrap_usize!(args.next()?);
 
     Some(RedrawEvent::ModeChange { name, index })
 }
@@ -181,7 +189,7 @@ fn parse_hl_attr_define(args: impl Iterator<Item = Value>) -> Option<RedrawEvent
             let cterm_attr = parse_rgb_attr(arg.pop()?)?;
             let rgb_attr = parse_rgb_attr(arg.pop()?)?;
 
-            let id = arg.pop()?.as_i64()? as i32;
+            let id = arg.pop()?.as_u64()? as usize;
 
             Some(HighlightAttr {
                 id,
@@ -215,36 +223,44 @@ fn parse_rgb_attr(arg: Value) -> Option<RgbAttr> {
 }
 
 fn parse_grid_line(lines: impl Iterator<Item = Value>) -> Option<RedrawEvent> {
-    let grid_lines = lines.filter_map(|line| {
-        let mut line = unwrap_array!(line);
+    let grid_lines = lines
+        .filter_map(|line| {
+            let mut line = unwrap_array!(line);
 
-        let line_cells = unwrap_array!(line.pop()?);
+            let line_cells = unwrap_array!(line.pop()?);
 
-        let mut cells: Vec<GridCell> = Vec::with_capacity(line_cells.len());
+            let mut cells: Vec<GridCell> = Vec::with_capacity(line_cells.len());
 
-        for lc in line_cells {
-            let mut cell = unwrap_array!(lc).into_iter();
+            for lc in line_cells {
+                let mut cell = unwrap_array!(lc).into_iter();
 
-            let text = unwrap_string!(cell.next()?);
-            let hl_id = cell
-                .next()
-                .and_then(|h| h.as_u64())
-                .unwrap_or_else(|| cells.last().unwrap().hl_id);
-            let repeated = cell.next().and_then(|r| r.as_u64()).unwrap_or(1);
+                let text = unwrap_string!(cell.next()?);
+                let hl_id = cell
+                    .next()
+                    .and_then(|h| h.as_u64())
+                    .unwrap_or_else(|| cells.last().unwrap().hl_id as u64)
+                    as usize;
+                let repeated = cell.next().and_then(|r| r.as_u64()).unwrap_or(1) as usize;
 
-            cells.push(GridCell {
-                text,
-                hl_id,
-                repeated,
-            });
-        }
+                cells.push(GridCell {
+                    text,
+                    hl_id,
+                    repeated,
+                });
+            }
 
-        let col_start = line.pop()?.as_u64()? as u32;
-        let row = line.pop()?.as_u64()? as u32;
-        let grid = line.pop()?.as_i64()? as i32;
+            let col_start = line.pop()?.as_u64()? as usize;
+            let row = line.pop()?.as_u64()? as usize;
+            let grid = line.pop()?.as_u64()? as usize;
 
-        Some(GridLine{ grid, row, col_start, cells })
-    }).collect();
+            Some(GridLine {
+                grid,
+                row,
+                col_start,
+                cells,
+            })
+        })
+        .collect();
 
     Some(RedrawEvent::GridLine(grid_lines))
 }

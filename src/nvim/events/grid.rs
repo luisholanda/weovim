@@ -1,6 +1,6 @@
 use super::Color;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct RgbAttr {
     pub foreground: Option<Color>,
     pub background: Option<Color>,
@@ -15,40 +15,40 @@ pub struct RgbAttr {
 
 #[derive(Debug)]
 pub struct HighlightAttr {
-    pub id: i32,
+    pub id: usize,
     pub rgb_attr: RgbAttr,
     pub cterm_attr: RgbAttr,
 }
 
 #[derive(Debug)]
 pub struct GridLine {
-    pub grid: i32,
-    pub row: u32,
-    pub col_start: u32,
+    pub grid: usize,
+    pub row: usize,
+    pub col_start: usize,
     pub cells: Vec<GridCell>,
 }
 
 #[derive(Debug)]
 pub struct GridCell {
     pub text: String,
-    pub hl_id: u64,
-    pub repeated: u64,
+    pub hl_id: usize,
+    pub repeated: usize,
 }
 
 #[derive(Debug)]
 pub struct GridGoto {
-    pub grid: i32,
-    pub row: u32,
-    pub column: u32,
+    pub grid: usize,
+    pub row: usize,
+    pub column: usize,
 }
 
 #[derive(Debug)]
 pub struct GridScroll {
-    pub grid: i32,
-    pub top: u32,
-    pub bottom: u32,
-    pub left: u32,
-    pub right: u32,
-    pub rows: u32,
-    pub columns: u32,
+    pub grid: usize,
+    pub top: usize,
+    pub bottom: usize,
+    pub left: usize,
+    pub right: usize,
+    pub rows: i64,
+    pub columns: usize,
 }
