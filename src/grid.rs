@@ -88,19 +88,15 @@ impl Lines {
     }
 
     pub fn render<'l>(&'l mut self, hl_groups: &'l HighlightGroups) -> RenderedLines<'l> {
-        let cached = std::mem::replace(
-            &mut self.cached_sections,
-            Vec::with_capacity(self.lines.len()),
-        );
+        for (i, line) in self.lines.iter().enumerate() {
+            if self.cached_sections[i].is_none() {
+                self.cached_sections[i] = Some(line.render());
+            }
+        }
 
-        cached
-            .into_par_iter()
-            .zip_eq(self.lines.par_iter())
-            .map(|(c, l)| Some(c.unwrap_or_else(|| l.render())))
-            .collect_into_vec(&mut self.cached_sections);
-
-        self.cached_sections
-            .par_iter()
+        self
+            .cached_sections
+            .iter()
             .flatten()
             .map(|cl| SectionedLine {
                 text: cl.text.as_str(),
