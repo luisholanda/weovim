@@ -10,3 +10,4 @@ edition = "2018"
 neovim-lib = { git = "https://github.com/daa84/neovim-lib" }
 crossbeam-channel = "0.3.9"
 mimalloc = "0.1.6"
+fnv = "1.0.6"

@@ -1,6 +1,6 @@
 use crate::editor::HighlightGroups;
 use crate::nvim::events::grid::{GridLine, RgbAttr};
-use std::collections::HashSet;
+use fnv::FnvHashSet;
 
 /// A grid line sectioned by a property `H` with underlying text `T`.
 ///
@@ -34,7 +34,7 @@ pub struct Lines {
     cached_sections: Vec<SectionedLine<usize>>,
     rows: usize,
     cols: usize,
-    dirty_lines: HashSet<usize>,
+    dirty_lines: FnvHashSet<usize>,
 }
 
 impl Lines {
