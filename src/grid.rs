@@ -40,7 +40,7 @@ pub struct Lines {
 impl Lines {
     pub fn update_lines(&mut self, grid_lines: Vec<GridLine>) {
         for gl in grid_lines {
-            self.dirty_lines.insert(gl.row);
+            self.dirty_line(gl.row);
 
             let line = self.line_at_mut(gl.row);
             lines::update(line, gl);
@@ -48,14 +48,14 @@ impl Lines {
     }
 
     pub fn resize(&mut self, rows: usize, columns: usize) {
-        self.rows = rows;
-        self.cols = columns;
-
         self.dirty_all();
         self.cached_sections.resize_with(rows, || SectionedLine {
             text: String::with_capacity(columns),
             sections: Vec::with_capacity(columns / 2),
         });
+
+        self.rows = rows;
+        self.cols = columns;
 
         self.cells
             .resize_with(rows * columns, lines::LineCell::default);
@@ -75,36 +75,36 @@ impl Lines {
         } else if rows < 0 {
             Stride::Desc(reg[1], (reg[0] as i64 - rows - 1) as usize)
         } else {
-            // This return guarantees that the unsafe operation will
-            // be safe.
+            // When `rows == 0`, we aren't scrolling anything, so we ca
+            // just return.
             return;
         };
 
         let left = reg[2];
-        let right = reg[3];
+        let line_range = reg[3] - left;
+
+        // This is needed to guarantee the safety of the unsafe block.
+        if self.cols < left {
+            panic!("Called scroll with region bigger that line!");
+        }
 
         for i in range {
             self.dirty_line(i);
 
-            unsafe {
-                // As rows != 0, src and dst will guaranteed be
-                // non-overlapping regions (src_idx != i).
-                let src_idx = (i as i64 + rows) as usize;
-                debug_assert_ne!(src_idx, i);
+            // As rows != 0, src and dst will guaranteed be
+            // non-overlapping regions (src_idx != i).
+            let src_idx = (i as i64 + rows) as usize;
 
+            unsafe {
                 let dst = self.line_at_mut(i).as_mut_ptr().add(left);
                 let src = self.line_at_mut(src_idx).as_mut_ptr().add(left);
 
-                // Swap src[left..=right] with dst[left..=right]
-                std::ptr::swap_nonoverlapping(src, dst, right - left);
+                std::ptr::swap_nonoverlapping(src, dst, line_range);
             }
         }
     }
 
     pub fn render<'l>(&'l mut self, hl_groups: &'l HighlightGroups) -> RenderedLines<'l> {
-        use std::time::Instant;
-        let now = Instant::now();
-
         for row in &self.dirty_lines {
             let start = row * self.cols;
             let end = start + self.cols;
@@ -131,8 +131,6 @@ impl Lines {
             })
             .collect();
 
-        println!("Render took {}ns", now.elapsed().as_nanos());
-
         lines
     }
 
@@ -146,12 +144,18 @@ impl Lines {
 
     #[inline]
     fn dirty_all(&mut self) {
-        self.dirty_lines.extend(0..self.rows);
+        for i in 0..self.rows {
+            self.dirty_line(i);
+        }
     }
 
-    #[inline]
     fn dirty_line(&mut self, i: usize) {
-        self.dirty_lines.insert(i);
+        if self.dirty_lines.insert(i) {
+            let cache = &mut self.cached_sections[i];
+
+            cache.sections.clear();
+            cache.text.clear();
+        }
     }
 }
 
@@ -223,23 +227,18 @@ mod lines {
                 hl_id: gc.hl_id,
             };
 
-            for i in 0..gc.repeated - 1 {
+            for i in 1..gc.repeated {
                 cells[i].clone_from(&new_cell);
             }
 
-            cells[gc.repeated - 1] = new_cell;
+            cells[0] = new_cell;
             cells = &mut cells[gc.repeated..];
         }
     }
 
     pub(super) fn render(line: &Line, sectioned: &mut SectionedLine<usize>) {
-        sectioned.sections.clear();
-        sectioned.text.clear();
-
-        // The first is guaranteed to be set.
         if let Some((fc, cells)) = line.split_first() {
             sectioned.text.push_str(&fc.chr);
-            sectioned.text.reserve(cells.len());
 
             let mut hl = fc.hl_id;
             let mut start = 0;
@@ -250,9 +249,8 @@ mod lines {
                 if cell.hl_id != hl {
                     sectioned.sections.push(Section { hl, start, end });
 
-                    start = end;
-
                     hl = cell.hl_id;
+                    start = end;
                 }
             }
         }
