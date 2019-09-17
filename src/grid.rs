@@ -1,56 +1,65 @@
 use crate::editor::HighlightGroups;
 use crate::nvim::events::grid::{GridLine, RgbAttr};
 
-#[derive(Debug, Copy, Clone)]
-pub struct Section<H> {
-    pub hl: H,
-    pub start: usize,
-    pub end: usize,
-}
-
+/// A grid line sectioned by a property `H` with underlying text `T`.
+///
+/// "Sectioned" here means that we already calculated all the sections in the line's
+/// text, meaning that we found all the continuous slices of text that have the same
+/// value for some property `H`. Normally `H` will be the highlight group of the text.
 #[derive(Debug, Default)]
 pub struct SectionedLine<H, T = String> {
+    /// The full line text.
     pub text: T,
+    /// The sections of text with same value for `H`.
     pub sections: Vec<Section<H>>,
+}
+
+/// A slice of a grid line that have the same value for a property `H`.
+#[derive(Debug, Copy, Clone)]
+pub struct Section<H> {
+    /// The value of the property.
+    pub hl: H,
+    /// The start of the slice.
+    pub start: usize,
+    /// The end of the slice, exclusive.
+    pub end: usize,
 }
 
 pub type RenderedLines<'l> = Vec<SectionedLine<&'l RgbAttr, &'l str>>;
 
 #[derive(Debug, Default)]
 pub struct Lines {
-    lines: Vec<Line>,
+    cells: Vec<Option<LineCell>>,
     cached_sections: Vec<Cache<SectionedLine<usize>>>,
+    rows: usize,
+    cols: usize,
 }
 
 impl Lines {
     pub fn update_lines(&mut self, grid_lines: Vec<GridLine>) {
-        for line in grid_lines {
-            self.cached_sections[line.row].invalidate();
+        for gl in grid_lines {
+            self.cached_sections[gl.row].invalidate();
 
-            self.lines[line.row].update(line);
+            let line = self.line_at_mut(gl.row);
+            lines::update(line, gl);
         }
     }
 
     pub fn resize(&mut self, rows: usize, columns: usize) {
+        self.rows = rows;
+        self.cols = columns;
+
         self.clear_cache();
         self.cached_sections.resize_with(rows, Cache::default);
 
-        let old_len = self.lines.len();
-
-        if old_len < rows {
-            self.lines.resize(rows, Line::with_capacity(columns));
-        }
-
-        for line in &mut self.lines[..old_len] {
-            line.resize(columns);
-        }
+        self.cells.resize(rows * columns, None);
     }
 
     pub fn clear(&mut self) {
         self.clear_cache();
 
-        for line in &mut self.lines {
-            line.clear();
+        for cell in &mut self.cells {
+            cell.take();
         }
     }
 
@@ -77,8 +86,8 @@ impl Lines {
                 let src_idx = (i as i64 + rows) as usize;
                 assert!(src_idx != i);
 
-                let dst = self.lines[i].cells.as_mut_ptr().add(left);
-                let src = self.lines[src_idx].cells.as_mut_ptr().add(left);
+                let dst = self.line_at_mut(i).as_mut_ptr().add(left);
+                let src = self.line_at_mut(src_idx).as_mut_ptr().add(left);
 
                 // Swap src[left..=right] with dst[left..=right]
                 std::ptr::swap_nonoverlapping(src, dst, right - left);
@@ -87,9 +96,16 @@ impl Lines {
     }
 
     pub fn render<'l>(&'l mut self, hl_groups: &'l HighlightGroups) -> RenderedLines<'l> {
-        for (line, cache) in self.lines.iter().zip(self.cached_sections.iter_mut()) {
+        use std::time::Instant;
+        let now = Instant::now();
+
+        for (row, cache) in self.cached_sections.iter_mut().enumerate() {
             if !cache.valid {
-                cache.update(|val| line.render(val));
+                let start = row * self.cols;
+                let end = start + self.cols;
+
+                let line = &mut self.cells[start..end];
+                cache.update(|val| lines::render(line, val));
             }
         }
 
@@ -111,13 +127,24 @@ impl Lines {
             })
             .collect();
 
+        println!("Render took {}ns", now.elapsed().as_nanos());
+
         lines
     }
 
+    #[inline]
     fn clear_cache(&mut self) {
         for cs in &mut self.cached_sections {
             cs.invalidate();
         }
+    }
+
+    #[inline]
+    fn line_at_mut(&mut self, row: usize) -> &mut lines::Line {
+        let start = row * self.cols;
+        let end = start + self.cols;
+
+        &mut self.cells[start..end]
     }
 }
 
@@ -145,32 +172,15 @@ struct LineCell {
     hl_id: usize,
 }
 
-#[derive(Debug, Clone)]
-struct Line {
-    cells: Vec<Option<LineCell>>,
-}
+mod lines {
+    use super::*;
 
-impl Line {
-    fn with_capacity(cap: usize) -> Self {
-        Self {
-            cells: vec![None; cap],
-        }
-    }
+    pub(super) type Line = [Option<LineCell>];
 
-    fn clear(&mut self) {
-        for cell in &mut self.cells {
-            cell.take();
-        }
-    }
+    pub(super) fn update(line: &mut Line, new_line: GridLine) {
+        let mut cells = &mut line[new_line.col_start..];
 
-    fn resize(&mut self, cap: usize) {
-        self.cells.resize_with(cap, Option::default);
-    }
-
-    fn update(&mut self, line: GridLine) {
-        let mut cells = &mut self.cells[line.col_start..];
-
-        for gc in line.cells {
+        for gc in new_line.cells {
             let new_cell = Some(LineCell {
                 chr: gc.text,
                 hl_id: gc.hl_id,
@@ -185,14 +195,14 @@ impl Line {
         }
     }
 
-    fn render(&self, sectioned: &mut SectionedLine<usize>) {
+    pub(super) fn render(line: &Line, sectioned: &mut SectionedLine<usize>) {
         sectioned.sections.clear();
         sectioned.text.clear();
 
-        sectioned.sections.reserve(self.cells.len());
+        sectioned.sections.reserve(line.len());
 
         let mut empty = 0usize;
-        for c in &self.cells {
+        for c in line {
             if c.is_none() {
                 sectioned.text.push(' ');
                 empty += 1;
@@ -201,33 +211,32 @@ impl Line {
             }
         }
 
-        if empty < self.cells.len() {
-            // The first is guaranteed to be set.
-            if let Some((Some(fc), cells)) = self.cells[empty..].split_first() {
-                sectioned.text.push_str(&fc.chr);
-                sectioned.text.reserve(cells.len());
+        // The entire line is empty.
+        if empty == line.len() {
+            return;
+        }
 
-                let mut hl = fc.hl_id;
-                let mut start = 0;
-                let mut end = 0;
+        // The first is guaranteed to be set.
+        if let Some((Some(fc), cells)) = line[empty..].split_first() {
+            sectioned.text.push_str(&fc.chr);
+            sectioned.text.reserve(cells.len());
 
-                for c in cells {
-                    if let Some(c) = c {
-                        sectioned.text.push_str(&c.chr);
+            let mut hl = fc.hl_id;
+            let mut start = 0;
 
-                        if c.hl_id == hl {
-                            end += 1;
-                        } else {
-                            sectioned.sections.push(Section { hl, start, end });
+            for (end, cell) in cells.iter().enumerate() {
+                if let Some(c) = cell {
+                    sectioned.text.push_str(&c.chr);
 
-                            start = end + 1;
-                            end = start;
+                    if c.hl_id != hl {
+                        sectioned.sections.push(Section { hl, start, end });
 
-                            hl = c.hl_id;
-                        }
-                    } else {
-                        sectioned.text.push(' ');
+                        start = end;
+
+                        hl = c.hl_id;
                     }
+                } else {
+                    sectioned.text.push(' ');
                 }
             }
         }
