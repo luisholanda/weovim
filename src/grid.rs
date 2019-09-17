@@ -1,6 +1,5 @@
 use crate::editor::HighlightGroups;
 use crate::nvim::events::grid::{GridLine, RgbAttr};
-use rayon::prelude::*;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Section<H> {
@@ -9,7 +8,7 @@ pub struct Section<H> {
     pub end: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SectionedLine<H, T = String> {
     pub text: T,
     pub sections: Vec<Section<H>>,
@@ -20,13 +19,13 @@ pub type RenderedLines<'l> = Vec<SectionedLine<&'l RgbAttr, &'l str>>;
 #[derive(Debug, Default)]
 pub struct Lines {
     lines: Vec<Line>,
-    cached_sections: Vec<Option<SectionedLine<usize>>>,
+    cached_sections: Vec<Cache<SectionedLine<usize>>>,
 }
 
 impl Lines {
     pub fn update_lines(&mut self, grid_lines: Vec<GridLine>) {
         for line in grid_lines {
-            self.cached_sections[line.row].take();
+            self.cached_sections[line.row].invalidate();
 
             self.lines[line.row].update(line);
         }
@@ -34,12 +33,14 @@ impl Lines {
 
     pub fn resize(&mut self, rows: usize, columns: usize) {
         self.clear_cache();
-        self.cached_sections.resize_with(rows, Option::default);
+        self.cached_sections.resize_with(rows, Cache::default);
 
         let old_len = self.lines.len();
 
-        self.lines
-            .resize_with(rows, || Line::with_capacity(columns));
+        if old_len < rows {
+            self.lines.resize(rows, Line::with_capacity(columns));
+        }
+
         for line in &mut self.lines[..old_len] {
             line.resize(columns);
         }
@@ -68,7 +69,7 @@ impl Lines {
         let right = reg[3];
 
         for i in range {
-            self.cached_sections[i].take();
+            self.cached_sections[i].invalidate();
 
             unsafe {
                 // As rows != 0, src and dst will guaranteed be
@@ -86,18 +87,19 @@ impl Lines {
     }
 
     pub fn render<'l>(&'l mut self, hl_groups: &'l HighlightGroups) -> RenderedLines<'l> {
-        for (i, line) in self.lines.iter().enumerate() {
-            if self.cached_sections[i].is_none() {
-                self.cached_sections[i] = Some(line.render());
+        for (line, cache) in self.lines.iter().zip(self.cached_sections.iter_mut()) {
+            if !cache.valid {
+                cache.update(|val| line.render(val));
             }
         }
 
-        self.cached_sections
+        let lines = self
+            .cached_sections
             .iter()
-            .flatten()
             .map(|cl| SectionedLine {
-                text: cl.text.as_str(),
+                text: cl.value.text.as_str(),
                 sections: cl
+                    .value
                     .sections
                     .iter()
                     .map(|s| Section {
@@ -107,13 +109,33 @@ impl Lines {
                     })
                     .collect(),
             })
-            .collect()
+            .collect();
+
+        lines
     }
 
     fn clear_cache(&mut self) {
         for cs in &mut self.cached_sections {
-            (*cs) = None;
+            cs.invalidate();
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct Cache<T> {
+    value: T,
+    valid: bool,
+}
+
+impl<T> Cache<T> {
+    #[inline]
+    fn invalidate(&mut self) {
+        self.valid = false;
+    }
+
+    fn update(&mut self, f: impl FnOnce(&mut T)) {
+        f(&mut self.value);
+        self.valid = true;
     }
 }
 
@@ -146,8 +168,7 @@ impl Line {
     }
 
     fn update(&mut self, line: GridLine) {
-        let cells = &mut self.cells[line.col_start..];
-        let mut idx = 0;
+        let mut cells = &mut self.cells[line.col_start..];
 
         for gc in line.cells {
             let new_cell = Some(LineCell {
@@ -155,43 +176,49 @@ impl Line {
                 hl_id: gc.hl_id,
             });
 
-            for _ in 0..gc.repeated - 1 {
-                cells[idx] = new_cell.clone();
-                idx += 1;
+            for i in 0..gc.repeated - 1 {
+                cells[i].clone_from(&new_cell);
             }
 
-            cells[idx] = new_cell;
-            idx += 1;
+            cells[gc.repeated - 1] = new_cell;
+            cells = &mut cells[gc.repeated..];
         }
     }
 
-    fn render(&self) -> SectionedLine<usize> {
-        let mut sections = Vec::with_capacity(self.cells.len());
+    fn render(&self, sectioned: &mut SectionedLine<usize>) {
+        sectioned.sections.clear();
+        sectioned.text.clear();
 
-        let cells = self.cells.as_slice();
+        sectioned.sections.reserve(self.cells.len());
 
-        let empty: usize = cells.iter().take_while(|c| c.is_none()).count();
-        let mut text = " ".repeat(empty);
+        let mut empty = 0usize;
+        for c in &self.cells {
+            if c.is_none() {
+                sectioned.text.push(' ');
+                empty += 1;
+            } else {
+                break;
+            }
+        }
 
         if empty < self.cells.len() {
             // The first is guaranteed to be set.
-            if let Some((Some(fc), cells)) = cells[empty..].split_first() {
-                text.reserve(cells.len());
+            if let Some((Some(fc), cells)) = self.cells[empty..].split_first() {
+                sectioned.text.push_str(&fc.chr);
+                sectioned.text.reserve(cells.len());
 
                 let mut hl = fc.hl_id;
                 let mut start = 0;
                 let mut end = 0;
 
-                text.push_str(&fc.chr);
-
                 for c in cells {
                     if let Some(c) = c {
-                        text.push_str(&c.chr);
+                        sectioned.text.push_str(&c.chr);
 
                         if c.hl_id == hl {
                             end += 1;
                         } else {
-                            sections.push(Section { hl, start, end });
+                            sectioned.sections.push(Section { hl, start, end });
 
                             start = end + 1;
                             end = start;
@@ -199,13 +226,11 @@ impl Line {
                             hl = c.hl_id;
                         }
                     } else {
-                        text.push(' ');
+                        sectioned.text.push(' ');
                     }
                 }
             }
         }
-
-        SectionedLine { text, sections }
     }
 }
 
