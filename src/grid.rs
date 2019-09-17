@@ -2,6 +2,9 @@ use crate::editor::HighlightGroups;
 use crate::nvim::events::grid::{GridLine, RgbAttr};
 use fnv::FnvHashSet;
 
+mod lines;
+mod rendered;
+
 /// A grid line sectioned by a property `H` with underlying text `T`.
 ///
 /// "Sectioned" here means that we already calculated all the sections in the line's
@@ -26,18 +29,38 @@ pub struct Section<H> {
     pub end: usize,
 }
 
+// FIXME: This should be an `Iterator` to remove the allocations.
+/// A set of renderized lines.
+///
+/// The lines are sectioned by highlight group, facilitating the colouring by
+/// the renderer.
 pub type RenderedLines<'l> = Vec<SectionedLine<&'l RgbAttr, &'l str>>;
 
+/// A line grid.
+///
+/// Represents an entire Neovim grid.
 #[derive(Debug, Default)]
 pub struct Lines {
+    /// Continuous cells of the grid.
+    ///
+    /// Each line is stored in the slice `cells[rows * cols..(rows+1) * cols]`.
+    ///
+    /// The `Vec` should always have size `rows * cols`.
     cells: Vec<lines::LineCell>,
-    cached_sections: Vec<SectionedLine<usize>>,
+    /// Number of rows (that is, lines) in the grid.
     rows: usize,
+    /// Number of columns in each line of the grid.
     cols: usize,
+    /// Cached rendering of lines.
+    ///
+    /// Allocations are re-used between renderings.
+    cached_sections: Vec<SectionedLine<usize>>,
+    /// Lines that were modified and should be re-renderized.
     dirty_lines: FnvHashSet<usize>,
 }
 
 impl Lines {
+    /// Updates the lines using a batch of modifications sent by Neovim.
     pub fn update_lines(&mut self, grid_lines: Vec<GridLine>) {
         for gl in grid_lines {
             self.dirty_line(gl.row);
@@ -47,6 +70,7 @@ impl Lines {
         }
     }
 
+    /// Resize the grid to `rows x columns`.
     pub fn resize(&mut self, rows: usize, columns: usize) {
         self.dirty_all();
         self.cached_sections.resize_with(rows, || SectionedLine {
@@ -61,14 +85,55 @@ impl Lines {
             .resize_with(rows * columns, lines::LineCell::default);
     }
 
+    /// Clears the entire grid.
     pub fn clear(&mut self) {
         self.dirty_all();
 
         for cell in &mut self.cells {
-            (*cell) = lines::LineCell::default();
+            cell.clear();
         }
     }
 
+    /// Scroll a region of `grid`.
+    ///
+    /// This is semantically unrelated to editor |scrolling|, rather this is
+    /// an optimized way to say "copy these screen cells".
+    ///
+    /// The following diagrams show what happens per scroll direction.
+    ///
+    /// * "===" represents the SR (scroll region) boundaries.
+    /// * "---" represents the moved rectangles.
+    ///
+    /// Note that dst and src share a common region.
+    ///
+    /// If `rows` is bigger than 0, move a rectangle in the SR up, this can
+    /// happen while scrolling down.
+    ///
+    /// 	+-------------------------+
+    /// 	| (clipped above SR)      |            ^
+    /// 	|=========================| dst_top    |
+    /// 	| dst (still in SR)       |            |
+    /// 	+-------------------------+ src_top    |
+    /// 	| src (moved up) and dst  |            |
+    /// 	|-------------------------| dst_bot    |
+    /// 	| src (invalid)           |            |
+    /// 	+=========================+ src_bot
+    ///
+    /// If `rows` is less than zero, move a rectangle in the SR down, this can
+    /// happen while scrolling up.
+    ///
+    /// 	+=========================+ src_top
+    /// 	| src (invalid)           |            |
+    /// 	|------------------------ | dst_top    |
+    /// 	| src (moved down) and dst|            |
+    /// 	+-------------------------+ src_bot    |
+    /// 	| dst (still in SR)       |            |
+    /// 	|=========================| dst_bot    |
+    /// 	| (clipped below SR)      |            v
+    /// 	+-------------------------+
+    ///
+    /// `cols` is always zero in this version of Nvim, and reserved for future
+    /// use.
     pub fn scroll(&mut self, reg: [usize; 4], rows: i64) {
         let range = if rows > 0 {
             Stride::Asc(reg[0], (reg[1] as i64 - rows + 1) as usize)
@@ -104,6 +169,7 @@ impl Lines {
         }
     }
 
+    /// Render the grid lines using a set of highlight groups.
     pub fn render<'l>(&'l mut self, hl_groups: &'l HighlightGroups) -> RenderedLines<'l> {
         for row in &self.dirty_lines {
             let start = row * self.cols;
@@ -180,79 +246,6 @@ impl Iterator for Stride {
                 Some(start)
             }
             _ => None,
-        }
-    }
-}
-
-mod lines {
-    use super::*;
-
-    #[derive(Debug)]
-    pub(super) struct LineCell {
-        chr: String,
-        hl_id: usize,
-    }
-
-    impl Clone for LineCell {
-        fn clone(&self) -> Self {
-            LineCell {
-                chr: self.chr.clone(),
-                hl_id: self.hl_id,
-            }
-        }
-
-        fn clone_from(&mut self, source: &Self) {
-            self.chr.clone_from(&source.chr);
-            self.hl_id = source.hl_id;
-        }
-    }
-
-    impl Default for LineCell {
-        fn default() -> Self {
-            LineCell {
-                chr: String::from(" "),
-                hl_id: usize::max_value(),
-            }
-        }
-    }
-
-    pub(super) type Line = [LineCell];
-
-    pub(super) fn update(line: &mut Line, new_line: GridLine) {
-        let mut cells = &mut line[new_line.col_start..];
-
-        for gc in new_line.cells {
-            let new_cell = LineCell {
-                chr: gc.text,
-                hl_id: gc.hl_id,
-            };
-
-            for i in 1..gc.repeated {
-                cells[i].clone_from(&new_cell);
-            }
-
-            cells[0] = new_cell;
-            cells = &mut cells[gc.repeated..];
-        }
-    }
-
-    pub(super) fn render(line: &Line, sectioned: &mut SectionedLine<usize>) {
-        if let Some((fc, cells)) = line.split_first() {
-            sectioned.text.push_str(&fc.chr);
-
-            let mut hl = fc.hl_id;
-            let mut start = 0;
-
-            for (end, cell) in cells.iter().enumerate() {
-                sectioned.text.push_str(&cell.chr);
-
-                if cell.hl_id != hl {
-                    sectioned.sections.push(Section { hl, start, end });
-
-                    hl = cell.hl_id;
-                    start = end;
-                }
-            }
         }
     }
 }
