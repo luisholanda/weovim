@@ -1,3 +1,4 @@
+use mimalloc::MiMalloc;
 use neovim_lib::NeovimApi;
 
 mod cursor;
@@ -7,6 +8,9 @@ mod nvim;
 mod ui;
 
 use editor::{Editor, EventRes};
+
+#[global_allocator]
+static GLOBAL_ALLOCATOR: MiMalloc = MiMalloc;
 
 fn main() {
     let (mut neovim, rx) = nvim::start_neovim();
