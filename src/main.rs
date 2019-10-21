@@ -1,3 +1,10 @@
+#![feature(const_fn)]
+
+#[macro_use]
+extern crate glsl_to_spirv_macros;
+#[macro_use]
+extern crate glsl_to_spirv_macros_impl;
+
 use mimalloc::MiMalloc;
 use neovim_lib::NeovimApi;
 

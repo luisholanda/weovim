@@ -1,9 +1,11 @@
 use crate::editor::HighlightGroups;
-use crate::nvim::events::grid::{GridLine, RgbAttr};
+use crate::nvim::events::grid::GridLine;
 use fnv::FnvHashSet;
 
 mod lines;
-mod rendered;
+pub mod rendered;
+
+use rendered::RenderedLines;
 
 /// A grid line sectioned by a property `H` with underlying text `T`.
 ///
@@ -28,13 +30,6 @@ pub struct Section<H> {
     /// The end of the slice, exclusive.
     pub end: usize,
 }
-
-// FIXME: This should be an `Iterator` to remove the allocations.
-/// A set of renderized lines.
-///
-/// The lines are sectioned by highlight group, facilitating the colouring by
-/// the renderer.
-pub type RenderedLines<'l> = Vec<SectionedLine<&'l RgbAttr, &'l str>>;
 
 /// A line grid.
 ///
@@ -180,24 +175,7 @@ impl Lines {
         }
         self.dirty_lines.clear();
 
-        let lines = self
-            .cached_sections
-            .iter()
-            .map(|sl| SectionedLine {
-                text: sl.text.as_str(),
-                sections: sl
-                    .sections
-                    .iter()
-                    .map(|s| Section {
-                        hl: hl_groups.group(s.hl),
-                        start: s.start,
-                        end: s.end,
-                    })
-                    .collect(),
-            })
-            .collect();
-
-        lines
+        RenderedLines::new(&self.cached_sections, hl_groups)
     }
 
     #[inline]

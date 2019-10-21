@@ -65,9 +65,12 @@ pub(super) fn render(line: &Line, sectioned: &mut SectionedLine<usize>) {
 
         let mut hl = fc.hl_id;
         let mut start = 0;
+        let mut end = fc.chr.len();
 
-        for (end, cell) in cells.iter().enumerate() {
+        for cell in cells {
             sectioned.text.push_str(&cell.chr);
+
+            end += cell.chr.len();
 
             if cell.hl_id != hl {
                 sectioned.sections.push(Section { hl, start, end });

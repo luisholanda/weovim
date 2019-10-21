@@ -55,9 +55,9 @@ impl Editor {
     pub fn render(&mut self) {
         let text = self.lines.render(&self.hl_groups);
 
-        for (i, l) in text.iter().enumerate() {
+        for (i, l) in text.enumerate() {
             if i == self.cursor.row {
-                for (col, chr) in l.text.chars().enumerate() {
+                for (col, (chr, _)) in l.enumerate() {
                     if col == self.cursor.col {
                         print!("\u{2588}");
                     } else {
@@ -66,7 +66,7 @@ impl Editor {
                 }
                 println!();
             } else {
-                println!("{}", l.text);
+                println!("{}", l.text());
             }
         }
     }
