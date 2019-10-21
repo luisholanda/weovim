@@ -11,3 +11,10 @@ neovim-lib = { git = "https://github.com/daa84/neovim-lib" }
 crossbeam-channel = "0.3.9"
 mimalloc = "0.1.6"
 fnv = "1.0.6"
+winit = "0.20.0-alpha3"
+wgpu = { git = "https://github.com/gfx-rs/wgpu-rs", rev = "cb25914b95b58fee0dc139b400867e7a731d98f4" }
+wgpu_glyph = { git = "https://github.com/hecrj/wgpu_glyph", rev = "48daa98f5f785963838b4345e86ac40eac095ba9" }
+glyph_brush = "0.5.3"
+nalgebra = "0.18.1"
+glsl-to-spirv-macros = "0.1.1"
+glsl-to-spirv-macros-impl = "0.1.0"

@@ -170,9 +170,9 @@ fn parse_mode_change(args: Vec<Value>) -> Option<RedrawEvent> {
 
 fn parse_default_colors(mut args: impl Iterator<Item = Value>) -> Option<RedrawEvent> {
     args.next()?.as_array().map(|colors| {
-        let fg = Color::from_u64(colors[0].as_u64().unwrap_or(0));
-        let bg = Color::from_u64(colors[1].as_u64().unwrap_or(std::u64::MAX));
-        let sp = Color::from_u64(colors[2].as_u64().unwrap_or(16711680));
+        let fg = Color::from_rgb_u64(colors[0].as_u64().unwrap_or(0));
+        let bg = Color::from_rgb_u64(colors[1].as_u64().unwrap_or(std::u64::MAX));
+        let sp = Color::from_rgb_u64(colors[2].as_u64().unwrap_or(16_711_680));
 
         RedrawEvent::DefaultColorSet { fg, bg, sp }
     })
@@ -207,9 +207,9 @@ fn parse_rgb_attr(arg: Value) -> Option<RgbAttr> {
 
     for (k, v) in unwrap_map!(arg) {
         match k.as_str()? {
-            "foreground" => attr.foreground = v.as_u64().map(Color::from_u64),
-            "background" => attr.background = v.as_u64().map(Color::from_u64),
-            "special" => attr.special = v.as_u64().map(Color::from_u64),
+            "foreground" => attr.foreground = v.as_u64().map(Color::from_rgb_u64),
+            "background" => attr.background = v.as_u64().map(Color::from_rgb_u64),
+            "special" => attr.special = v.as_u64().map(Color::from_rgb_u64),
             "reverse" => attr.reverse = v.as_bool()?,
             "italic" => attr.italic = v.as_bool()?,
             "bold" => attr.bold = v.as_bool()?,
