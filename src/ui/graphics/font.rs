@@ -1,8 +1,8 @@
 use super::transform::Transformation;
-use crate::ui::text::Text;
 use crate::ui::rect::Rect;
+use crate::ui::text::Text;
 use std::borrow::Cow;
-use wgpu_glyph::{GlyphBrush, GlyphCruncher, Section, SectionText, Scale, VariedSection};
+use wgpu_glyph::{GlyphBrush, GlyphCruncher, Scale, Section, SectionText, VariedSection};
 
 pub struct Font<'f> {
     glyphs: GlyphBrush<'f, ()>,
@@ -25,10 +25,10 @@ impl<'f> Font<'f> {
     }
 
     /// Enqueue many [Text]s to be drawn.
-    pub fn add_many(&mut self, texts: Vec<Text<'_>>) {
-        let mut sections = Vec::with_capacity(texts.len());
+    pub fn add_many<'t>(&mut self, texts: impl Iterator<Item = Text<'t>>, total: Option<usize>) {
+        let mut sections = Vec::with_capacity(total.unwrap_or_default());
 
-        for text in &texts {
+        for text in texts {
             sections.push(SectionText {
                 text: &text.content,
                 scale: wgpu_glyph::Scale {
@@ -36,7 +36,7 @@ impl<'f> Font<'f> {
                     y: text.position.y,
                 },
                 color: text.color.into_raw_components(),
-                font_id: wgpu_glyph::FontId::default()
+                font_id: wgpu_glyph::FontId::default(),
             });
         }
 
