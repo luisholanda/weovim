@@ -235,7 +235,7 @@ const QUAD_VERTS: [Vertex; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
 
 #[derive(Debug, Clone, Copy)]
 pub struct Quad {
-    pub source: [f32; 4],
+    pub position: [f32; 2],
     pub scale: [f32; 2],
     pub color: [f32; 4],
     pub border_radius: u32,

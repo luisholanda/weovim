@@ -1,6 +1,7 @@
 use super::{Section, SectionedLine};
 use crate::editor::HighlightGroups;
 use crate::nvim::events::grid::RgbAttr;
+use crate::ui::{Color, Text};
 
 pub struct RenderedLines<'l> {
     lines: &'l [SectionedLine<usize>],
@@ -51,10 +52,14 @@ impl<'l> RenderedLine<'l> {
     pub fn text(&self) -> &'l str {
         self.text
     }
+
+    pub fn n_sections(&self) -> usize {
+        self.sections.len()
+    }
 }
 
 impl<'l> Iterator for RenderedLine<'l> {
-    type Item = (&'l str, &'l RgbAttr);
+    type Item = Text<'l>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((section, sections)) = self.sections.split_first() {
@@ -62,7 +67,12 @@ impl<'l> Iterator for RenderedLine<'l> {
 
             let rgb_attr = self.hl_groups.group(section.hl);
             if let Some(text) = self.text.get(section.start..section.end) {
-                return Some((text, rgb_attr));
+                return Some(Text {
+                    content: text,
+                    size: 0.0,
+                    color: rgb_attr.foreground.unwrap_or(Color::BLACK),
+                    background: rgb_attr.background.unwrap_or(Color::WHITE),
+                });
             } else {
                 panic!(
                     "Received section with invalid range {}-{}",

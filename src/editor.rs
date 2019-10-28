@@ -12,7 +12,7 @@ pub struct Editor {
     current_mode: usize,
     cursor: Cursor,
     hl_groups: HighlightGroups,
-    moodes: Vec<ModeInfo>,
+    modes: Vec<ModeInfo>,
 }
 
 impl Editor {
@@ -22,10 +22,10 @@ impl Editor {
 
     pub fn handle_nvim_redraw_event(&mut self, event: RedrawEvent) -> EventRes {
         match event {
-            RedrawEvent::ModeInfoSet { mode_info, .. } => self.moodes = mode_info,
+            RedrawEvent::ModeInfoSet { mode_info, .. } => self.modes = mode_info,
             RedrawEvent::ModeChange { index, .. } => {
                 self.current_mode = index;
-                self.cursor.change_shape(self.moodes[index].cursor_shape);
+                self.cursor.change_shape(self.modes[index].cursor_shape);
             }
             RedrawEvent::Busy(busy) => self.nvim_busy = busy,
             RedrawEvent::Flush => return EventRes::Render,

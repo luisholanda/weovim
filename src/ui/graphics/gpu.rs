@@ -2,16 +2,18 @@ use winit::window::Window;
 
 use super::color::Color;
 use super::font::Font;
-use super::quad::Pipeline;
+use super::quad::{Pipeline, Quad};
 use super::transform::Transformation;
+use super::Point;
+use crate::ui::Text;
 
 pub struct Gpu<'f> {
     surface: wgpu::Surface,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    font: Font<'f>,
     quad: Pipeline,
+    font: Font<'f>,
 }
 
 pub struct Target {
@@ -66,6 +68,21 @@ impl<'f> Gpu<'f> {
             height,
             transformation: Transformation::orthographic(width as f32, height as f32),
             swap_chain,
+        }
+    }
+
+    pub(in crate::ui) fn queue_text(&mut self, position: Point, text: Text) -> Point {
+        if let Some((min, max)) = self.font.add(position, &text) {
+            self.quad.enqueue(Quad {
+                position: [min.x, min.y],
+                scale: [max.x - min.x, max.y - min.y],
+                color: text.background.into_raw_components(),
+                border_radius: 0,
+            });
+
+            Point::new(max.x, max.y)
+        } else {
+            position
         }
     }
 
