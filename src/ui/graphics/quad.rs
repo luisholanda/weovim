@@ -12,6 +12,32 @@ pub struct Pipeline {
     quads: Vec<Quad>,
 }
 
+fn load_modules() -> (Vec<u32>, Vec<u32>) {
+    use shaderc::*;
+
+    let mut compiler = Compiler::new().expect("Failed to initalize SPIR-V compiler!");
+
+    let frag = compiler.compile_into_spirv(
+        include_str!("shader/quad.frag"),
+        ShaderKind::Fragment,
+        "quad.frag",
+        "main",
+        None).unwrap();
+
+    let vert = compiler.compile_into_spirv(
+        include_str!("shader/quad.vert"),
+        ShaderKind::Vertex,
+        "quad.vert",
+        "main",
+        None
+    ).unwrap();
+
+    let frag_spirv = wgpu::read_spirv(Cursor::new(frag.as_binary_u8())).expect("Failed to read SPIR-V fragment shader");
+    let vert_spirv = wgpu::read_spirv(Cursor::new(vert.as_binary_u8())).expect("Failed to read SPIR-V fragment shader");
+
+    (frag_spirv, vert_spirv)
+}
+
 impl Pipeline {
     pub fn new(device: &mut wgpu::Device) -> Pipeline {
         let (transform, constants, layout) = {
@@ -36,7 +62,7 @@ impl Pipeline {
                     binding: 0,
                     resource: wgpu::BindingResource::Buffer {
                         buffer: &transform,
-                        range: 0..64,
+                        range: 0..(16 * mem::size_of::<f32>() as u64),
                     },
                 }],
             });
@@ -48,20 +74,10 @@ impl Pipeline {
             (transform, constants, layout)
         };
 
-        let vs_module = {
-            let vs = include_glsl_vs!("src/ui/graphics/shader/quad.vert");
-            let spirv =
-                wgpu::read_spirv(Cursor::new(&vs[..])).expect("Read quad vertex shader as SPIR-V");
+        let (vs_module, fs_module) = {
+            let (frag_spirv, vert_spirv) = load_modules();
 
-            device.create_shader_module(&spirv)
-        };
-
-        let fs_module = {
-            let fs = include_glsl_fs!("src/ui/graphics/shader/quad.frag");
-            let spirv =
-                wgpu::read_spirv(Cursor::new(&fs[..])).expect("Read quad vertex shader as SPIR-V");
-
-            device.create_shader_module(&spirv)
+            (device.create_shader_module(&vert_spirv), device.create_shader_module(&frag_spirv))
         };
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -109,7 +125,7 @@ impl Pipeline {
                     }],
                 },
                 wgpu::VertexBufferDescriptor {
-                    stride: mem::size_of::<Vertex>() as u64,
+                    stride: mem::size_of::<Quad>() as u64,
                     step_mode: wgpu::InputStepMode::Instance,
                     attributes: &[
                         wgpu::VertexAttributeDescriptor {
@@ -145,7 +161,7 @@ impl Pipeline {
             .fill_from_slice(&QUAD_VERTS);
 
         let indices = device
-            .create_buffer_mapped(QUAD_VERTS.len(), wgpu::BufferUsage::INDEX)
+            .create_buffer_mapped(QUAD_INDICES.len(), wgpu::BufferUsage::INDEX)
             .fill_from_slice(&QUAD_INDICES);
 
         let instances = device.create_buffer(&wgpu::BufferDescriptor {
@@ -238,7 +254,7 @@ pub struct Quad {
     pub position: [f32; 2],
     pub scale: [f32; 2],
     pub color: [f32; 4],
-    pub border_radius: u32,
+    pub border_radius: f32,
 }
 
 impl Quad {

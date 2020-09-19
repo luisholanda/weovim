@@ -1,35 +1,35 @@
-#![feature(const_fn)]
+#![feature(const_fn, never_type)]
 
-#[macro_use]
-extern crate glsl_to_spirv_macros;
-#[macro_use]
-extern crate glsl_to_spirv_macros_impl;
-
+use self::neovim::UiOptions;
 use mimalloc::MiMalloc;
-use neovim_lib::NeovimApi;
 
+mod color;
 mod cursor;
 mod editor;
 mod grid;
-mod nvim;
-mod ui;
+mod neovim;
+//mod nvim;
+//mod ui;
 
-use editor::{Editor, EventRes};
+use editor::Editor;
 
 #[global_allocator]
 static GLOBAL_ALLOCATOR: MiMalloc = MiMalloc;
 
-fn main() {
-    let (mut neovim, rx) = nvim::start_neovim();
-    let mut edt = Editor::new();
+#[tokio::main(core_threads = 2, max_threads = 8)]
+async fn main() -> std::io::Result<()> {
+    env_logger::init();
 
-    println!("{:?}", neovim.ui_try_resize(800, 600));
+    let (mut neovim, recv) = neovim::Neovim::start(neovim::LoggerEventListener)?;
+    neovim
+        .ui_attach(80, 30, UiOptions::RGB | UiOptions::EXT_LINEGRID)
+        .await?;
+    log::info!("UI attached");
 
-    for event in rx {
-        match edt.handle_nvim_redraw_event(event) {
-            EventRes::Render => edt.render(),
-            EventRes::Destroy => return,
-            EventRes::NextOne => {}
-        }
+    if let Err(error) = recv.run_loop().await {
+        log::error!("Error in neovim event loop: {}", error);
+        std::process::exit(1);
+    } else {
+        Ok(())
     }
 }

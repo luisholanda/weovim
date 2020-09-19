@@ -7,7 +7,7 @@ layout(location = 3) flat in uint v_BorderRadius;
 
 layout(location = 0) out vec4 o_Color;
 
-float rounded(in vec2 frag_coord, in vec2 position, in vec2 size, float radius, float s)
+float rounded(vec2 frag_coord, vec2 position, vec2 size, float radius, float s)
 {
     vec2 inner_size = size - vec2(radius, radius) * 2.0;
     vec2 top_left = position + vec2(radius, radius);

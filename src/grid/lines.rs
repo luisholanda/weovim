@@ -64,20 +64,23 @@ pub(super) fn render(line: &Line, sectioned: &mut SectionedLine<usize>) {
         sectioned.text.push_str(&fc.chr);
 
         let mut hl = fc.hl_id;
-        let mut start = 0;
-        let mut end = fc.chr.len();
+        let mut old_len = 0;
 
         for cell in cells {
-            sectioned.text.push_str(&cell.chr);
+            if cell.hl_id != hl && sectioned.text.len() != old_len {
+                log::trace!(target: "line-render", "New section: hl - {}, text - {}", hl, &sectioned.text[old_len..]);
 
-            end += cell.chr.len();
-
-            if cell.hl_id != hl {
-                sectioned.sections.push(Section { hl, start, end });
+                sectioned.sections.push(Section {
+                    hl,
+                    start: old_len,
+                    end: sectioned.text.len(),
+                });
 
                 hl = cell.hl_id;
-                start = end;
+                old_len = sectioned.text.len();
             }
+
+            sectioned.text.push_str(&cell.chr);
         }
     }
 }

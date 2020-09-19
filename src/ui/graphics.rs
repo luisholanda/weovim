@@ -1,4 +1,4 @@
-pub type Point = nalgebra::Point<f32, nalgebra::U2>;
+pub type Point = nalgebra::Point2<f32>;
 
 pub(self) mod color;
 pub(self) mod font;

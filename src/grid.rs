@@ -1,6 +1,7 @@
 use crate::editor::HighlightGroups;
 use crate::nvim::events::grid::GridLine;
 use fnv::FnvHashSet;
+use std::cmp::Ordering;
 
 mod lines;
 pub mod rendered;
@@ -104,40 +105,37 @@ impl Lines {
     /// If `rows` is bigger than 0, move a rectangle in the SR up, this can
     /// happen while scrolling down.
     ///
-    /// 	+-------------------------+
-    /// 	| (clipped above SR)      |            ^
-    /// 	|=========================| dst_top    |
-    /// 	| dst (still in SR)       |            |
-    /// 	+-------------------------+ src_top    |
-    /// 	| src (moved up) and dst  |            |
-    /// 	|-------------------------| dst_bot    |
-    /// 	| src (invalid)           |            |
-    /// 	+=========================+ src_bot
+    ///         +-------------------------+
+    ///         | (clipped above SR)      |            ^
+    ///         |=========================| dst_top    |
+    ///         | dst (still in SR)       |            |
+    ///         +-------------------------+ src_top    |
+    ///         | src (moved up) and dst  |            |
+    ///         |-------------------------| dst_bot    |
+    ///         | src (invalid)           |            |
+    ///         +=========================+ src_bot
     ///
     /// If `rows` is less than zero, move a rectangle in the SR down, this can
     /// happen while scrolling up.
     ///
-    /// 	+=========================+ src_top
-    /// 	| src (invalid)           |            |
-    /// 	|------------------------ | dst_top    |
-    /// 	| src (moved down) and dst|            |
-    /// 	+-------------------------+ src_bot    |
-    /// 	| dst (still in SR)       |            |
-    /// 	|=========================| dst_bot    |
-    /// 	| (clipped below SR)      |            v
-    /// 	+-------------------------+
+    ///         +=========================+ src_top
+    ///         | src (invalid)           |            |
+    ///         |------------------------ | dst_top    |
+    ///         | src (moved down) and dst|            |
+    ///         +-------------------------+ src_bot    |
+    ///         | dst (still in SR)       |            |
+    ///         |=========================| dst_bot    |
+    ///         | (clipped below SR)      |            v
+    ///         +-------------------------+
     ///
     /// `cols` is always zero in this version of Nvim, and reserved for future
     /// use.
     pub fn scroll(&mut self, reg: [usize; 4], rows: i64) {
-        let range = if rows > 0 {
-            Stride::Asc(reg[0], (reg[1] as i64 - rows + 1) as usize)
-        } else if rows < 0 {
-            Stride::Desc(reg[1], (reg[0] as i64 - rows - 1) as usize)
-        } else {
-            // When `rows == 0`, we aren't scrolling anything, so we ca
-            // just return.
-            return;
+        let range = match 0.cmp(&rows) {
+            Ordering::Greater => Stride::Asc(reg[0], (reg[1] as i64 - rows + 1) as usize),
+            Ordering::Less => Stride::Desc(reg[1], (reg[0] as i64 - rows - 1) as usize),
+            // When `rows == 0`, we aren't scrolling anything, so we can just return.
+            Ordering::Equal => return,
         };
 
         let left = reg[2];
