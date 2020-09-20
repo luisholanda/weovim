@@ -151,7 +151,7 @@ pub enum RedrawEvent<'a> {
 }
 
 /// Properties of a mode.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct ModeInfo {
     /// The shape of the cursor to be used when the editor is this mode.
     pub cursor_shape: CursorShape,
@@ -297,6 +297,13 @@ impl RgbAttr {
     /// Undercurl text. The line has `special` color.
     pub const fn undercurl(&self) -> bool {
         self.flags.contains(RgbAttrFlags::UNDERCURL)
+    }
+
+    /// Return the reverse version of this [`RgbAttr`].
+    pub fn reverse_rgb_attr(&self) -> Self {
+        let mut copy = *self;
+        std::mem::swap(&mut copy.foreground, &mut copy.background);
+        copy
     }
 }
 
@@ -522,11 +529,11 @@ impl<'a> RedrawEvent<'a> {
                 }
             }
             "mouse_on" => {
-                msg::ensure_parameters_count(0)?;
+                msg::ensure_parameters_count(raw, 0)?;
                 events.push(Self::Mouse(true));
             }
             "mouse_off" => {
-                msg::ensure_parameters_count(0)?;
+                msg::ensure_parameters_count(raw, 0)?;
                 events.push(Self::Mouse(false));
             }
             "busy_start" => {
@@ -672,12 +679,11 @@ impl<'a> RedrawEvent<'a> {
                             _ => return msg::err_invalid_input(),
                         }
                     }
-                    "cell_percentage" => {
-                        info.cell_percentage = msg::read_u64(raw)? as f64 / 100.0
-                    },
+                    "cell_percentage" => info.cell_percentage = msg::read_u64(raw)? as f64 / 100.0,
                     "attr_id" | "hl_id" => info.attr_id = msg::read_u64(raw)?,
                     // Ignored keys.
-                    "blinkoff" | "blinkon" | "blinkwait" | "attr_id_lm" | "id_lm" | "mouse_shape" => {
+                    "blinkoff" | "blinkon" | "blinkwait" | "attr_id_lm" | "id_lm"
+                    | "mouse_shape" => {
                         msg::read_u64(raw)?;
                     }
                     "short_name" | "name" => {
@@ -686,7 +692,7 @@ impl<'a> RedrawEvent<'a> {
                     opt => {
                         log::error!("received invalid mode info option: {}", opt);
                         return msg::err_invalid_input();
-                    },
+                    }
                 }
             }
 

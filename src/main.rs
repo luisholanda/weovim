@@ -1,4 +1,4 @@
-#![feature(const_fn, never_type)]
+#![feature(const_fn, never_type, slice_fill, str_split_once)]
 
 use self::neovim::UiOptions;
 use mimalloc::MiMalloc;
@@ -8,7 +8,6 @@ mod cursor;
 mod editor;
 mod grid;
 mod neovim;
-//mod nvim;
 //mod ui;
 
 use editor::Editor;

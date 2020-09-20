@@ -86,7 +86,10 @@ fn num_value_read_error_to_io_error(err: NumValueReadError) -> Error {
 
 #[track_caller]
 pub fn err_invalid_input<T>() -> io::Result<T> {
-    log::error!("invalid message pack input received at {}", Location::caller());
+    log::error!(
+        "invalid message pack input received at {}",
+        Location::caller()
+    );
     Err(Error::new(
         ErrorKind::InvalidInput,
         "expected RPC notification with one argument",
@@ -95,7 +98,10 @@ pub fn err_invalid_input<T>() -> io::Result<T> {
 
 #[track_caller]
 pub fn err_invalid_method<T>() -> io::Result<T> {
-    log::error!("invalid message pack method received at {}", Location::caller());
+    log::error!(
+        "invalid message pack method received at {}",
+        Location::caller()
+    );
     Err(Error::new(
         ErrorKind::InvalidInput,
         "expected RPC notification with one argument, found different method",
