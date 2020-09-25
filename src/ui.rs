@@ -1,102 +1,233 @@
-use crate::grid::rendered::*;
-use crate::editor::{Editor, EventRes};
-use crate::nvim::events::RedrawEvent;
-use crossbeam_channel::{Receiver, select};
-use neovim_lib::{Neovim, NeovimApi};
+use crate::editor::UiStateFromEditor;
+use std::sync::Arc;
+use winit::dpi::*;
+use winit::event::*;
+use winit::event_loop::{EventLoop, ControlFlow};
+#[cfg(target_os = "macos")]
+use winit::platform::macos::WindowBuilderExtMacOS;
+use winit::window::{Window, WindowBuilder, CursorIcon};
+use std::sync::{atomic::{AtomicU32, AtomicBool, Ordering}, Mutex};
 
-pub(self) mod graphics;
-pub(self) mod rect;
-pub(self) mod text;
-pub(self) mod window;
-
-pub use graphics::{Color, Point};
-pub use text::Text;
-
-use text::UiGridRender;
-use window::UIEvent;
-use std::ops::Deref;
-
-pub fn start_ui(nvim: Neovim, nvim_events: Receiver<RedrawEvent>, editor: Editor) -> ! {
-    window::UIWindow::run(move |window, ui_events| {
-        let mut nvim = nvim;
-        let mut editor = editor;
-
-        let font = load_font(String::from("DelugiaCode NF"));
-
-        let mut gpu = graphics::gpu::Gpu::for_window(&window, &font).expect("Failed to access GPU");
-        let (width, height): (u32, u32) = window.physical_size().into();
-        let mut target = {
-
-            gpu.target(width as u16, height as u16)
-        };
-
-        nvim.ui_try_resize(width as i64, height as i64).expect("Failed to resize neovim");
-
-        let mut grid_element_height = 12.0f32;
-        let line_height_multiplier = 1.04;
-
-        loop {
-            select! {
-                recv(ui_events) -> event => {
-                    let event = match event {
-                        Err(_) => continue,
-                        Ok(event) => event,
-                    };
-
-                    match event {
-                        UIEvent::CloseRequested => window.exit(),
-                        UIEvent::Resized(_) => {
-                            let (width, height): (u32, u32) = window.physical_size().into();
-                            let width = width as u16;
-                            let height = height as u16;
-
-                            if width != target.width || height != target.height {
-                                target = gpu.target(width, height);
-                                nvim.ui_try_resize(width as i64, height as i64).expect("Failed to resize neovim");
-                            }
-                        }
-                        _ => {}
-                    }
-                },
-                recv(nvim_events) -> event => {
-                    let event = match event {
-                        Err(_) => continue,
-                        Ok(event) => event,
-                    };
-
-                    match editor.handle_nvim_redraw_event(event) {
-                        EventRes::Render => {
-                            UiGridRender::build(editor.render())
-                                .with_text_size(grid_element_height)
-                                .with_line_height_multiplier(line_height_multiplier)
-                                .render(&mut gpu);
-
-                            gpu.draw(&mut target, Color::WHITE);
-                        }
-                        EventRes::Destroy => return,
-                        EventRes::Resize(_, height) => {
-                            let win_height = window.physical_size().height;
-
-                            grid_element_height = (win_height / height as f64).round() as f32;
-                        },
-                        EventRes::NextOne => {}
-                    }
-                },
-            }
-        }
-    });
+pub struct Ui {
+    window: UiWindow,
+    input: UiInput,
 }
 
-fn load_font(name: String) -> impl Deref<Target = Vec<u8>> {
-    use font_kit::source::SystemSource;
-    use font_kit::family_name::FamilyName;
-    use font_kit::properties::Properties;
+impl Ui {
+    pub fn new() -> (Arc<Ui>, UiEventLoop) {
+        let event_loop = EventLoop::new();
+        let window = UiWindow::build(&event_loop);
 
-    let font = SystemSource::new()
-        .select_best_match(&[FamilyName::Title(name)], &Properties::new())
-        .unwrap()
-        .load()
-        .unwrap();
+        let ui = Arc::new(Ui {
+            window,
+            input: Default::default(),
+        });
 
-    font.copy_font_data().unwrap()
+        let ui_event_loop = UiEventLoop {
+            ui: ui.clone(),
+            event_loop,
+        };
+
+        (ui, ui_event_loop)
+    }
+}
+
+struct UiInput {
+    modifiers_state: ModifiersState,
+    mouse_hold: Option<MouseButton>,
+    is_typing: bool,
+}
+
+impl Default for UiInput {
+    fn default() -> Self {
+        Self {
+            modifiers_state: ModifiersState::empty(),
+            mouse_hold: None,
+            is_typing: false
+        }
+    }
+}
+
+impl UiInput {
+    fn is_holding(&self) -> bool {
+        self.mouse_hold.is_some()
+    }
+}
+
+struct UiWindow {
+    winit_window: Window,
+    window_status: WindowStatus,
+}
+
+/// Window manipulation methods.
+impl UiWindow {
+    fn build(event_loop: &EventLoop<()>) -> Self {
+        let builder = WindowBuilder::new()
+            .with_resizable(true)
+            .with_visible(false)
+            .with_transparent(true)
+            .with_title("WeoVim");
+
+        // Hide the decorations
+        #[cfg(target_os = "macos")]
+        let builder = builder
+            .with_title_hidden(true)
+            .with_titlebar_buttons_hidden(true)
+            .with_titlebar_transparent(true)
+            .with_fullsize_content_view(true);
+
+        #[cfg(not(target_os = "macos"))]
+        let builder = builder.with_decorations(false);
+
+        let winit_window = builder.build(&event_loop).unwrap();
+
+        // Don't let the window extend past the window monitor.
+        let monitor = winit_window.current_monitor();
+        winit_window.set_max_inner_size(Some(monitor.size()));
+
+        Self {
+            winit_window,
+            window_status: WindowStatus::Suspended
+        }
+    }
+
+    fn show_window(&self) {
+        self.winit_window.set_visible(true);
+    }
+
+    fn hide_window(&self) {
+        self.winit_window.set_visible(false);
+    }
+
+    fn request_redraw(&self) {
+        self.winit_window.request_redraw()
+    }
+
+    fn set_title(&self, title: &str) {
+        self.winit_window.set_title(title)
+    }
+
+    fn show_cursor(&self) {
+        self.winit_window.set_cursor_visible(true)
+    }
+
+    fn hide_cursor(&self) {
+        self.winit_window.set_cursor_visible(false)
+    }
+
+    fn set_cursor_icon(&self, icon: CursorIcon) {
+        self.winit_window.set_cursor_icon(icon)
+    }
+
+    fn change_window_status(&mut self, new_status: WindowStatus) -> bool {
+        std::mem::replace(&mut self.window_status, new_status) != new_status
+    }
+}
+
+/// Size-related methods.
+impl UiWindow {
+    fn scale_factor(&self) -> f64 {
+        self.winit_window.scale_factor()
+    }
+
+    fn size(&self) -> PhysicalSize<u32> {
+        self.winit_window.inner_size()
+    }
+
+    fn logical_size(&self) -> LogicalSize<u32> {
+        self.size().to_logical(self.scale_factor())
+    }
+
+    fn convert_to_logical<P: Pixel>(&self, position: PhysicalPosition<P>) -> LogicalPosition<u32> {
+        position.to_logical(self.scale_factor())
+    }
+
+    fn convert_to_physical<P: Pixel>(&self, position: LogicalPosition<P>) -> PhysicalPosition<u32> {
+        position.to_physical(self.scale_factor())
+    }
+}
+
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+enum WindowStatus {
+    Focused,
+    Unfocused,
+    Suspended
+}
+
+impl WindowStatus {
+    const fn is_low_power(self) -> bool {
+        false
+    }
+}
+
+pub struct UiEventLoop {
+    ui: Arc<Ui>,
+    event_loop: EventLoop<()>,
+}
+
+impl UiEventLoop {
+    pub fn run(self) -> ! {
+        let ui = self.ui;
+        ui.window.show_window();
+        self.event_loop.run(move |event, _, control_flow| {
+            *control_flow = ControlFlow::Wait;
+
+            match event {
+                Event::WindowEvent { event, .. } => match event {
+                    WindowEvent::Resized(new_physical_size) => {
+                        // TODO: calculate margins to adjust window size to grid size.
+                        // TODO: Discover new grid size and send to neovim.
+                    },
+                    WindowEvent::CloseRequested => {
+                        // TODO: Send quit command to neovim.
+                        *control_flow = ControlFlow::Exit;
+                    },
+                    WindowEvent::DroppedFile(dropped_file_path) => {
+                        // TODO: What to do when a file is dropped in the client?
+                    },
+                    WindowEvent::Focused(true) => {
+                        // TODO: The window gained focus, stop FPS limiter
+                    },
+                    WindowEvent::Focused(false) => {
+                        // TODO: The window lost focus, start FPS limiter
+                    },
+                    WindowEvent::KeyboardInput { input, is_synthetic, .. } if !is_synthetic => {
+                        // TODO: Handle user input.
+                    },
+                    WindowEvent::ReceivedCharacter(ch) => {
+                        // TODO: Handle unicode char input.
+                    },
+                    WindowEvent::ModifiersChanged(new_modifiers_state) => {
+                        // TODO: Handle modifiers change
+                    },
+                    WindowEvent::CursorMoved { position, .. } => {
+                        // TODO: Handle mouse movement.
+                    },
+                    WindowEvent::CursorEntered { .. } => {
+                        // TODO: Handle cursor enter
+                    }
+                    WindowEvent::CursorLeft { .. } => {
+                        // TODO: Handle cursor left
+                    },
+                    WindowEvent::MouseWheel { .. } => {
+                        // TODO: Handle mouse scroll.
+                    },
+                    WindowEvent::MouseInput { .. } => {
+                        // TODO: Handle mouse input
+                    },
+                    WindowEvent::ScaleFactorChanged { .. } => {
+                        // TODO: Handle dpi changes
+                    },
+                    _ => {}
+                },
+                Event::Resumed => {
+                    // TODO: Handle application resume
+                },
+                Event::Suspended => {
+                    // TODO: Handle application suspension
+                }
+                _ => {}
+            }
+        });
+    }
 }

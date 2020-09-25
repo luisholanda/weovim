@@ -218,7 +218,6 @@ impl Editor {
             if let Err(err) = self.tx.try_send(event) {
                 if let TrySendError::Full(e) = err {
                     event = e;
-                    log::warn!("editor <-> UI channel is full");
                     std::sync::atomic::spin_loop_hint();
                     continue
                 } else {

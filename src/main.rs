@@ -9,7 +9,7 @@ mod cursor;
 mod editor;
 mod grid;
 mod neovim;
-//mod ui;
+mod ui;
 
 #[global_allocator]
 static GLOBAL_ALLOCATOR: MiMalloc = MiMalloc;
@@ -31,10 +31,14 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
-    if let Err(error) = recv.run_loop().await {
-        log::error!("Error in neovim event loop: {}", error);
-        std::process::exit(1);
-    } else {
-        Ok(())
-    }
+    tokio::spawn(async move {
+        if let Err(error) = recv.run_loop().await {
+            log::error!("Error in neovim event loop: {}", error);
+            std::process::exit(1);
+        }
+    });
+
+    let (_, event_loop) = ui::Ui::new();
+
+    event_loop.run();
 }
