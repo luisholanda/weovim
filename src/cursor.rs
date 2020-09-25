@@ -1,4 +1,6 @@
-#[derive(Debug, Default)]
+use crate::neovim::CursorShape;
+
+#[derive(Debug, Default, Copy, Clone)]
 pub struct Cursor {
     pub row: usize,
     pub col: usize,
@@ -13,18 +15,5 @@ impl Cursor {
 
     pub fn change_shape(&mut self, shape: CursorShape) {
         self.shape = shape;
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum CursorShape {
-    Block,
-    Horizontal,
-    Vertical,
-}
-
-impl Default for CursorShape {
-    fn default() -> Self {
-        Self::Block
     }
 }

@@ -1,6 +1,3 @@
-use crate::color::Color;
-use crate::cursor::Cursor;
-use crate::grid::rendered::RenderedLines;
 use crate::grid::*;
 use crate::neovim::*;
 use cache_padded::CachePadded;
@@ -10,13 +7,14 @@ use std::sync::{
     atomic::{AtomicBool, AtomicI64, AtomicU16, Ordering},
     Arc,
 };
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, error::TrySendError};
 
 pub use self::buffering::*;
 
+const MPSC_CHANNEL_BUFFER_SIZE: usize = 128;
+
 pub struct Editor {
     lines: TripleBufferWriter,
-    cursor: Cursor,
     modes: Vec<ModeInfo>,
     curr_mode: usize,
     shared_state: Arc<UiEditorSharedState>,
@@ -24,15 +22,40 @@ pub struct Editor {
     tx: Sender<UiEditorEvent>,
 }
 
+impl EventListener for Editor {
+    fn on_redraw_event(&mut self, event: RedrawEvent<'_>) {
+        match event {
+            // Global events
+            RedrawEvent::ModeInfoSet { cursor_style_enabled, mode_infos } => {
+                self.set_modes_info(&mode_infos, cursor_style_enabled);
+            }
+            RedrawEvent::OptionSet(option) => self.set_ui_option(option),
+            RedrawEvent::ModeChange(new_mode) => self.change_mode(new_mode),
+            RedrawEvent::Mouse(mouse_enabled) => self.set_mouse(mouse_enabled),
+            RedrawEvent::Flush => self.flush(),
+
+            // Grid events
+            RedrawEvent::GridResize { width, height, .. } => self.resize_grid(width, height),
+            RedrawEvent::DefaultColorsSet(new_default) => self.set_default_color_set(new_default),
+            RedrawEvent::HlAttrDefine(hl_attr) => self.define_hl_attr(hl_attr),
+            RedrawEvent::GridLine(line) => self.redraw_grid_line(line),
+            RedrawEvent::GridClear(_) => self.clear_grid(),
+            RedrawEvent::GridScroll(scroll) => self.scroll_grid(scroll),
+
+            // Ignore rest of events.
+            _ => {}
+        }
+    }
+}
+
 impl Editor {
     pub fn new() -> (Self, UiStateFromEditor) {
         let (lines, output) = buffering::new_triple_buffer();
         let shared_state = Arc::<UiEditorSharedState>::default();
-        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        let (tx, rx) = tokio::sync::mpsc::channel(MPSC_CHANNEL_BUFFER_SIZE);
 
         let editor = Self {
             lines,
-            cursor: Cursor::default(),
             modes: Vec::default(),
             curr_mode: 0,
             font_source: SystemSource::new(),
@@ -58,23 +81,22 @@ impl Editor {
             .store(cursor_style_enabled, Ordering::Release);
     }
 
-    pub async fn set_ui_option(&mut self, option: UiOption<'_>) {
+    pub fn set_ui_option(&mut self, option: UiOption<'_>) {
         match option {
             UiOption::Int { option, value } => {
                 if option == "linespace" {
                     self.shared_state.linespace.store(value, Ordering::Release);
                 }
             }
-            UiOption::String { option, value } => {
-                if option == "guifont" {
+            UiOption::String { option, value } => match option {
+                "guifont" | "guifontset" => {
                     if let Some((font_family, size)) = self.parse_guifont(value) {
-                        self.tx
-                            .send(UiEditorEvent::FontChanged(font_family, size))
-                            .await;
+                        self.send_event(UiEditorEvent::FontChanged(font_family, size));
                     } else {
                         log::warn!("No available font in guifont");
                     }
                 }
+                _ => {}
             }
             UiOption::Bool { option, value } => match option {
                 "ext_linegrid" => self
@@ -111,8 +133,10 @@ impl Editor {
     }
 
     fn parse_guifont(&self, guifont: &str) -> Option<(FamilyHandle, u8)> {
+        dbg!(guifont);
         // TODO: handle escaped commas
         for font in guifont.split(',') {
+            dbg!(font);
             if let Some((name, size)) = font.split_once(":h") {
                 let size = size.parse::<u8>().unwrap_or(12);
 
@@ -141,7 +165,7 @@ impl Editor {
         self.shared_state.buzy.store(buzy, Ordering::Release);
     }
 
-    pub async fn flush(&mut self) {
+    pub fn flush(&mut self) {
         self.lines.buffer().render();
 
         // Check if the UI already processed the previous completed buffer.
@@ -149,18 +173,87 @@ impl Editor {
         // If it haven't, there is a pending redraw event in flight, meaning
         // that we will duplicate the rendering work if we send another one.
         if !self.lines.publish() {
-            self.tx.send(UiEditorEvent::Redraw).await;
+            self.send_event(UiEditorEvent::Redraw);
         }
     }
 
     pub fn resize_grid(&mut self, width: u64, height: u64) {
         self.lines.buffer().resize(height as usize, width as usize);
     }
+
+    pub fn set_default_color_set(&mut self, color_set: DefaultColorSet) {
+        self.send_event(UiEditorEvent::SetDefaultColorsSet(color_set));
+    }
+
+    pub fn define_hl_attr(&mut self, hl_attr: HighlightAttr) {
+        self.send_event(UiEditorEvent::DefineHlAttr(hl_attr));
+    }
+
+    pub fn redraw_grid_line(&mut self, grid_line: GridLine<'_>) {
+        self.lines.buffer().update_line(grid_line);
+    }
+
+    pub fn clear_grid(&mut self) {
+        self.lines.buffer().clear();
+    }
+
+    pub fn move_cursor(&mut self, cursor_goto: GridGoto) {
+        self.lines
+            .buffer()
+            .cursor_mut()
+            .move_to(cursor_goto.row as usize, cursor_goto.column as usize);
+    }
+
+    pub fn scroll_grid(&mut self, scroll: GridScroll) {
+        self.lines.buffer().scroll(scroll);
+    }
+
+    fn send_event(&mut self, mut event: UiEditorEvent) {
+        // We can spin loop as the chances of the UI be slow enough to not
+        // keep track of the small amount of events that we send is low.
+        //
+        // The only time where we send many events at once is when defining
+        // highlight groups, but storing new groups is very quickly.
+        loop {
+            if let Err(err) = self.tx.try_send(event) {
+                if let TrySendError::Full(e) = err {
+                    event = e;
+                    log::warn!("editor <-> UI channel is full");
+                    std::sync::atomic::spin_loop_hint();
+                    continue
+                } else {
+                    panic!("UI event receiver dropped before sender")
+                }
+            }
+
+            break;
+        }
+    }
 }
 
 pub enum UiEditorEvent {
     FontChanged(FamilyHandle, u8),
+    SetDefaultColorsSet(DefaultColorSet),
+    DefineHlAttr(HighlightAttr),
     Redraw,
+}
+
+impl std::fmt::Debug for UiEditorEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FontChanged(_, size) => f.debug_tuple("UiEditorEvent::FontChanged")
+                .field(&"..")
+                .field(&size)
+                .finish(),
+            Self::SetDefaultColorsSet(set) => f.debug_tuple("UiEditorEvent::SetDefaultColorsSet")
+                .field(&set)
+                .finish(),
+            Self::DefineHlAttr(hl_attr) => f.debug_tuple("UiEditorEvent::DefineHlAttr")
+                .field(&hl_attr)
+                .finish(),
+            Self::Redraw => f.debug_tuple("UiEditorEvent::Redraw").finish(),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -319,6 +412,9 @@ mod buffering {
         input_idx: u8,
     }
 
+    unsafe impl Send for TripleBufferWriter {}
+    unsafe impl Sync for TripleBufferWriter {}
+
     impl TripleBufferWriter {
         /// The current writing buffer.
         pub fn buffer(&mut self) -> &mut Lines {
@@ -342,8 +438,8 @@ mod buffering {
             self.input_idx = former_back_info & BACK_INDEX_MASK;
 
             // SAFETY: This is safe as we're creating a immutable reference and the protocol
-            //   ensures that th reader can't modify the buffers.
-            let complete = unsafe { &*self.shared.buffers[self.input_idx as usize].get() };
+            //   ensures that the reader can't modify the complete buffer.
+            let complete = unsafe { &*self.shared.buffers[old_index as usize].get() };
             let writing = self.buffer();
 
             // Ensure that the writing buffer is up to date with the complete buffer.
@@ -358,6 +454,9 @@ mod buffering {
         shared: Arc<TripleBufferSharedState>,
         output_idx: u8,
     }
+
+    unsafe impl Send for TripleBufferReader {}
+    unsafe impl Sync for TripleBufferReader {}
 
     impl TripleBufferReader {
         pub fn buffer(&mut self) -> &Lines {

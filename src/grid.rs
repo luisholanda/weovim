@@ -1,6 +1,7 @@
 pub use self::lines::LineCell;
+use crate::cursor::Cursor;
 use crate::editor::HighlightGroups;
-use crate::neovim::GridLine;
+use crate::neovim::{GridLine, GridScroll};
 use fnv::FnvHashSet;
 use std::cmp::Ordering;
 
@@ -69,6 +70,8 @@ pub struct Lines {
     rows: usize,
     /// Number of columns in each line of the grid.
     cols: usize,
+    /// The cursor state of this grid.
+    cursor: Cursor,
     /// Cached rendering of lines.
     ///
     /// Allocations are re-used between renderings.
@@ -83,6 +86,7 @@ impl Clone for Lines {
             cells: self.cells.clone(),
             rows: self.rows,
             cols: self.cols,
+            cursor: self.cursor,
             cached_sections: self.cached_sections.clone(),
             dirty_lines: self.dirty_lines.clone(),
         }
@@ -92,12 +96,21 @@ impl Clone for Lines {
         self.cells.clone_from(&source.cells);
         self.rows = source.rows;
         self.cols = source.cols;
+        self.cursor = source.cursor;
         self.cached_sections.clone_from(&source.cached_sections);
         self.dirty_lines.clone_from(&source.dirty_lines);
     }
 }
 
 impl Lines {
+    pub fn cursor(&self) -> Cursor {
+        self.cursor
+    }
+
+    pub fn cursor_mut(&mut self) -> &mut Cursor {
+        &mut self.cursor
+    }
+
     /// Updates the grid with the received neovim update.
     pub fn update_line(&mut self, grid_line: GridLine) {
         self.dirty_line(grid_line.row as usize);
@@ -168,21 +181,22 @@ impl Lines {
     ///
     /// `cols` is always zero in this version of Nvim, and reserved for future
     /// use.
-    pub fn scroll(&mut self, reg: [usize; 4], rows: i64) {
-        let range = match 0.cmp(&rows) {
-            Ordering::Greater => Stride::Asc(reg[0], (reg[1] as i64 - rows + 1) as usize),
-            Ordering::Less => Stride::Desc(reg[1], (reg[0] as i64 - rows - 1) as usize),
+    pub fn scroll(&mut self, scroll: GridScroll) {
+        let range = match 0.cmp(&scroll.rows) {
+            Ordering::Greater => {
+                Stride::Asc(scroll.top as usize, (scroll.bottom as i64 - scroll.rows + 1) as usize)
+            }
+            Ordering::Less => Stride::Desc(scroll.bottom as usize, (scroll.top as i64 - scroll.rows - 1) as usize),
             // When `rows == 0`, we aren't scrolling anything, so we can just return.
             Ordering::Equal => return,
         };
 
-        let left = reg[2];
-        let line_range = reg[3] - left;
-
         // This is needed to guarantee the safety of the unsafe block.
-        if self.cols < left {
+        if self.cols < scroll.left as usize {
             panic!("Called scroll with region bigger that line!");
         }
+
+        let line_range = (scroll.right - scroll.left) as usize;
 
         for i in range {
             self.dirty_line(i);
@@ -190,10 +204,10 @@ impl Lines {
             // SAFETY: As rows != 0, src and dst will guaranteed be different
             // lines and thus, non-overlapping regions (src_idx != i).
             unsafe {
-                let src_idx = (i as i64 + rows) as usize;
+                let src_idx = (i as i64 + scroll.rows) as usize;
 
-                let dst = self.line_at_mut(i).as_mut_ptr().add(left);
-                let src = self.line_at_mut(src_idx).as_mut_ptr().add(left);
+                let dst = self.line_at_mut(i).as_mut_ptr().add(scroll.left as usize);
+                let src = self.line_at_mut(src_idx).as_mut_ptr().add(scroll.left as usize);
 
                 std::ptr::swap_nonoverlapping(src, dst, line_range);
             }
@@ -212,6 +226,7 @@ impl Lines {
         self.dirty_lines.clear();
     }
 
+    /// Create an iterator over all rendered lines.
     pub fn rendered_lines<'l>(&'l self, hl_groups: &'l HighlightGroups) -> RenderedLines<'l> {
         RenderedLines::new(&self.cached_sections, hl_groups)
     }

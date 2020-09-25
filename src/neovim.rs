@@ -4,7 +4,7 @@ pub use self::api::UiOptions;
 pub use self::events::*;
 #[doc(inline)]
 pub use self::rpc::{EventListener, LoggerEventListener};
-use self::rpc::{EventReceiver, RpcMethod, RpcProcess};
+use self::rpc::{EventReceiver, RpcProcess};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, RwLock,
@@ -35,7 +35,7 @@ impl Neovim {
     ///
     /// The returned event receiver should be spawned in a executor, as to permit the application
     /// to receive the redraw events.
-    pub fn start<L: EventListener>(listener: L) -> std::io::Result<(Self, NeovimEventReceiver<L>)> {
+    pub fn start<L: EventListener>(listener: L) -> std::io::Result<(Self, NeovimEventLoop<L>)> {
         let (rpc, recv) = RpcProcess::spawn()?;
 
         let title = <Arc<RwLock<_>>>::default();
@@ -48,7 +48,7 @@ impl Neovim {
         };
 
         let neovim = Self { rpc, title, buzy };
-        let recv = NeovimEventReceiver {
+        let recv = NeovimEventLoop {
             receiver: recv,
             listener,
         };
@@ -67,12 +67,12 @@ impl Neovim {
     }
 }
 
-pub struct NeovimEventReceiver<L: EventListener> {
+pub struct NeovimEventLoop<L: EventListener> {
     receiver: EventReceiver,
     listener: NeovimEventListener<L>,
 }
 
-impl<L: EventListener> NeovimEventReceiver<L> {
+impl<L: EventListener> NeovimEventLoop<L> {
     pub async fn run_loop(self) -> std::io::Result<!> {
         self.receiver.start_loop(self.listener).await
     }
@@ -89,7 +89,7 @@ impl<L: EventListener> EventListener for NeovimEventListener<L> {
         match event {
             RedrawEvent::Busy(buzy) => {
                 self.buzy.store(buzy, Ordering::SeqCst);
-                self.listener.on_redraw_event(event);
+                self.listener.on_redraw_event(event)
             }
             RedrawEvent::SetTitle(title) => {
                 {
@@ -97,7 +97,7 @@ impl<L: EventListener> EventListener for NeovimEventListener<L> {
                     write.replace_range(.., title);
                 }
 
-                self.listener.on_redraw_event(RedrawEvent::SetTitle(title));
+                self.listener.on_redraw_event(RedrawEvent::SetTitle(title))
             }
             event => self.listener.on_redraw_event(event),
         }

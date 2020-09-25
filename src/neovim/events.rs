@@ -1,7 +1,6 @@
 use super::msg;
 use crate::color::Color;
 use bumpalo::{collections::Vec, Bump};
-use rmp::Marker;
 use std::io;
 
 /// Possible UI redraw events sent by neovim.
@@ -170,6 +169,12 @@ pub enum CursorShape {
     Block,
     Horizontal,
     Vertical,
+}
+
+impl Default for CursorShape {
+    fn default() -> Self {
+        Self::Block
+    }
 }
 
 /// An option related to the UI.
@@ -712,28 +717,28 @@ impl<'a> RedrawEvent<'a> {
 
         match option {
             "ambiwidth" | "guifontwide" | "guifont" | "guifontset" => {
-                return Ok(Self::OptionSet(UiOption::String {
+                Ok(Self::OptionSet(UiOption::String {
                     option,
                     value: msg::read_string(raw)?,
-                }));
+                }))
             }
             "pumblend" | "showtabline" | "ttimeoutlen" | "linespace" => {
-                return Ok(Self::OptionSet(UiOption::Int {
+                Ok(Self::OptionSet(UiOption::Int {
                     option,
                     value: msg::read_i64(raw)?,
-                }));
+                }))
             }
             "arabicshape" | "termguicolors" | "emoji" | "mousefocus" | "ttimeout"
             | "ext_linegrid" | "ext_multigrid" | "ext_hlstate" | "ext_termcolors"
             | "ext_cmdline" | "ext_popupmenu" | "ext_tabline" | "ext_wildmenu" | "ext_messages" => {
-                return Ok(Self::OptionSet(UiOption::Bool {
+                Ok(Self::OptionSet(UiOption::Bool {
                     option,
                     value: msg::read_bool(raw)?,
                 }))
             }
             option => {
                 log::warn!("found unknown option {}", option);
-                return msg::err_invalid_input();
+                msg::err_invalid_input()
             }
         }
     }

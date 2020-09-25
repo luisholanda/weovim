@@ -21,6 +21,7 @@ rmp = "0.8.9"
 bumpalo = { version = "3.4.0", features = ["collections", "boxed"] }
 bitflags = { version = "1.2.1", default-features = false }
 cache-padded = "1.1.1"
+futures-util = { version = "0.3.5", default-features = false, features = ["std", "async-await"] }
 
 [dependencies.tokio]
 version = "0.2.22"

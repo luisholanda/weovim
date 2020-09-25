@@ -1,10 +1,9 @@
 use super::events::*;
 use super::msg;
 use bumpalo::Bump;
-use std::{future::Future, io, process::Stdio, sync::Arc};
+use std::{io, process::Stdio};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::Mutex;
+use tokio::process::{ChildStdin, ChildStdout, Command};
 
 const MEM_ARENA_INITIAL_CAPACITY: usize = 2 * 1024;
 const RAW_IO_BUF_INITIAL_CAPACITY: usize = 16 * 1024;
@@ -22,7 +21,7 @@ pub struct LoggerEventListener;
 
 impl EventListener for LoggerEventListener {
     fn on_redraw_event<'e>(&mut self, event: RedrawEvent<'e>) {
-        log::debug!("Received redraw event: {:?}", event)
+        log::debug!("Received redraw event: {:?}", event);
     }
 }
 
@@ -199,7 +198,8 @@ impl EventReceiver {
                         match msg::read_string(&mut recv)? {
                             "redraw" => match RedrawEvent::decode(&mut recv, &self.mem_arena) {
                                 Ok(events) => {
-                                    events.into_iter().for_each(|e| listener.on_redraw_event(e))
+                                    events.into_iter()
+                                        .for_each(|e| listener.on_redraw_event(e))
                                 }
                                 Err(error) => {
                                     log::error!("Error while decoding RPC message: {}", error);
@@ -232,12 +232,12 @@ fn nvim_process() -> io::Result<(ChildStdin, ChildStdout)> {
     log::info!("Spawned neovim process at PID {}", nvim.id());
 
     let stdin = nvim
-        .stdin()
+        .stdin
         .take()
         .expect("child neovim process stdin not configured");
 
     let stdout = nvim
-        .stdout()
+        .stdout
         .take()
         .expect("child neovim process stdout not configured");
 
