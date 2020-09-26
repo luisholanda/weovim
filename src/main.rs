@@ -1,7 +1,7 @@
 #![feature(const_fn, never_type, slice_fill, str_split_once)]
 
-use self::neovim::UiOptions;
 use self::editor::Editor;
+use self::neovim::UiOptions;
 use mimalloc::MiMalloc;
 
 mod color;
@@ -20,16 +20,6 @@ async fn main() -> std::io::Result<()> {
 
     let (editor, mut ui_state) = Editor::new();
     let (mut neovim, recv) = neovim::Neovim::start(editor)?;
-    neovim
-        .ui_attach(80, 30, UiOptions::RGB | UiOptions::EXT_LINEGRID)
-        .await?;
-    log::info!("UI attached");
-
-    tokio::spawn(async move {
-        while let Some(ev) = ui_state.recv.recv().await {
-            log::info!("Received UiEditorEvent: {:?}", ev)
-        }
-    });
 
     tokio::spawn(async move {
         if let Err(error) = recv.run_loop().await {
@@ -38,7 +28,18 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
-    let (_, event_loop) = ui::Ui::new();
+    tokio::spawn(async move {
+        while let Some(ev) = ui_state.recv.recv().await {
+            log::info!("Received UiEditorEvent: {:?}", ev)
+        }
+    });
+
+    let (_, event_loop) = ui::Ui::new().await;
+
+    neovim
+        .ui_attach(80, 30, UiOptions::RGB | UiOptions::EXT_LINEGRID)
+        .await?;
+    log::info!("UI attached");
 
     event_loop.run();
 }

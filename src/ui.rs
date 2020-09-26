@@ -1,24 +1,38 @@
 use crate::editor::UiStateFromEditor;
 use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Mutex,
+};
 use winit::dpi::*;
 use winit::event::*;
-use winit::event_loop::{EventLoop, ControlFlow};
+use winit::event_loop::{ControlFlow, EventLoop};
 #[cfg(target_os = "macos")]
 use winit::platform::macos::WindowBuilderExtMacOS;
-use winit::window::{Window, WindowBuilder, CursorIcon};
-use std::sync::{atomic::{AtomicU32, AtomicBool, Ordering}, Mutex};
+use winit::window::{CursorIcon, Window, WindowBuilder};
+
+mod gpu;
+mod renderers;
+mod shaper;
 
 pub struct Ui {
+    gpu: Mutex<gpu::Gpu>,
+    quad: Mutex<renderers::QuadRenderer>,
     window: UiWindow,
     input: UiInput,
 }
 
 impl Ui {
-    pub fn new() -> (Arc<Ui>, UiEventLoop) {
+    pub async fn new() -> (Arc<Ui>, UiEventLoop) {
         let event_loop = EventLoop::new();
         let window = UiWindow::build(&event_loop);
 
+        let mut gpu = gpu::Gpu::new(&window).await;
+        let quad = renderers::QuadRenderer::new(&mut gpu);
+
         let ui = Arc::new(Ui {
+            gpu: Mutex::new(gpu),
+            quad: Mutex::new(quad),
             window,
             input: Default::default(),
         });
@@ -43,7 +57,7 @@ impl Default for UiInput {
         Self {
             modifiers_state: ModifiersState::empty(),
             mouse_hold: None,
-            is_typing: false
+            is_typing: false,
         }
     }
 }
@@ -87,7 +101,7 @@ impl UiWindow {
 
         Self {
             winit_window,
-            window_status: WindowStatus::Suspended
+            window_status: WindowStatus::Suspended,
         }
     }
 
@@ -147,11 +161,17 @@ impl UiWindow {
     }
 }
 
+impl UiWindow {
+    pub(self) fn raw(&self) -> &Window {
+        &self.winit_window
+    }
+}
+
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 enum WindowStatus {
     Focused,
     Unfocused,
-    Suspended
+    Suspended,
 }
 
 impl WindowStatus {
@@ -173,56 +193,68 @@ impl UiEventLoop {
             *control_flow = ControlFlow::Wait;
 
             match event {
+                Event::MainEventsCleared => ui.window.request_redraw(),
+                Event::RedrawRequested(_) => {
+                    let mut gpu = ui.gpu.lock().unwrap();
+                    let (frame, mut encoder) = gpu.begin_render(crate::color::Color::BLACK);
+
+                    ui.quad.lock().unwrap().render_in(&frame.view, &mut encoder);
+                    gpu.finish_render(frame, encoder);
+                }
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::Resized(new_physical_size) => {
                         // TODO: calculate margins to adjust window size to grid size.
                         // TODO: Discover new grid size and send to neovim.
-                    },
+                    }
                     WindowEvent::CloseRequested => {
                         // TODO: Send quit command to neovim.
                         *control_flow = ControlFlow::Exit;
-                    },
+                    }
                     WindowEvent::DroppedFile(dropped_file_path) => {
                         // TODO: What to do when a file is dropped in the client?
-                    },
+                    }
                     WindowEvent::Focused(true) => {
                         // TODO: The window gained focus, stop FPS limiter
-                    },
+                    }
                     WindowEvent::Focused(false) => {
                         // TODO: The window lost focus, start FPS limiter
-                    },
-                    WindowEvent::KeyboardInput { input, is_synthetic, .. } if !is_synthetic => {
+                    }
+                    WindowEvent::KeyboardInput {
+                        input,
+                        is_synthetic,
+                        ..
+                    } if !is_synthetic => {
                         // TODO: Handle user input.
-                    },
+                    }
                     WindowEvent::ReceivedCharacter(ch) => {
                         // TODO: Handle unicode char input.
-                    },
+                    }
                     WindowEvent::ModifiersChanged(new_modifiers_state) => {
                         // TODO: Handle modifiers change
-                    },
+                    }
                     WindowEvent::CursorMoved { position, .. } => {
                         // TODO: Handle mouse movement.
-                    },
+                    }
                     WindowEvent::CursorEntered { .. } => {
                         // TODO: Handle cursor enter
                     }
                     WindowEvent::CursorLeft { .. } => {
                         // TODO: Handle cursor left
-                    },
+                    }
                     WindowEvent::MouseWheel { .. } => {
                         // TODO: Handle mouse scroll.
-                    },
+                    }
                     WindowEvent::MouseInput { .. } => {
                         // TODO: Handle mouse input
-                    },
+                    }
                     WindowEvent::ScaleFactorChanged { .. } => {
                         // TODO: Handle dpi changes
-                    },
+                    }
                     _ => {}
                 },
                 Event::Resumed => {
                     // TODO: Handle application resume
-                },
+                }
                 Event::Suspended => {
                     // TODO: Handle application suspension
                 }
