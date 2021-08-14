@@ -1,7 +1,8 @@
 const RGBA_MAX_F32: f32 = 255.0;
 
 /// A color in the sRGB color space.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, zerocopy::AsBytes)]
+#[repr(C)]
 pub struct Color {
     /// The red color component.
     pub r: f32,
@@ -11,6 +12,12 @@ pub struct Color {
     pub b: f32,
     /// The alpha color component.
     pub a: f32,
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Self::BLACK
+    }
 }
 
 impl From<wgpu::Color> for Color {
@@ -46,9 +53,9 @@ impl Color {
 
     /// The White color.
     pub const WHITE: Color = Color {
-        r: 0.0,
-        g: 0.0,
-        b: 0.0,
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
         a: 1.0,
     };
 
@@ -72,7 +79,7 @@ impl Color {
 /// RGB color space transformations.
 impl Color {
     /// Create a [Color] from the raw RGBA channels.
-    pub const fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
+    pub fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self {
             r: r as f32 / RGBA_MAX_F32,
             g: g as f32 / RGBA_MAX_F32,
@@ -82,7 +89,7 @@ impl Color {
     }
 
     /// Create a [Color] from a RGBA representation (0xRRGGBBAA).
-    pub const fn from_rgba_u64(color: u64) -> Self {
+    pub fn from_rgba_u64(color: u64) -> Self {
         let r = ((color & 0xFF_00_00_00) >> 24) as u8;
         let g = ((color & 0x00_FF_00_00) >> 16) as u8;
         let b = ((color & 0x00_00_FF_00) >> 8) as u8;
@@ -102,12 +109,25 @@ impl Color {
     }
 
     /// Create a [Color] from the raw RGB channels.
-    pub const fn from_rgb(r: u8, g: u8, b: u8) -> Self {
+    pub fn from_rgb(r: u8, g: u8, b: u8) -> Self {
         Self::from_rgba(r, g, b, RGBA_MAX_F32 as u8)
     }
 
     /// Create a [Color] from the raw RGB representation (0xRRGGBB).
-    pub const fn from_rgb_u64(color: u64) -> Self {
+    pub fn from_rgb_u64(color: u64) -> Self {
         Self::from_rgba_u64(color << 8 | 0xFF)
+    }
+}
+
+impl Color {
+    pub const fn vertex_attribute_descriptor(
+        loc: wgpu::ShaderLocation,
+        offset: wgpu::BufferAddress,
+    ) -> wgpu::VertexAttributeDescriptor {
+        wgpu::VertexAttributeDescriptor {
+            shader_location: loc,
+            offset,
+            format: wgpu::VertexFormat::Float4,
+        }
     }
 }

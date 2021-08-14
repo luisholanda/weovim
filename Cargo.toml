@@ -7,22 +7,23 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mimalloc = "0.1.20"
+mimalloc = "0.1.22"
 fnv = "1.0.7"
-winit = "0.22.2"
-wgpu = "0.6.0"
-env_logger = "0.7.1"
+winit = "0.24.0"
+wgpu = "0.6.2"
+env_logger = "0.8.2"
 log = "0.4.11"
 font-kit = "0.10.0"
 rmp = "0.8.9"
 bumpalo = { version = "3.4.0", features = ["collections", "boxed"] }
 bitflags = { version = "1.2.1", default-features = false }
 cache-padded = "1.1.1"
-futures-util = { version = "0.3.5", default-features = false, features = ["std", "async-await"] }
+futures-util = { version = "0.3.8", default-features = false, features = ["std", "async-await"] }
+zerocopy = "0.3.0"
 
 [dependencies.tokio]
-version = "0.2.22"
-features = ["rt-threaded", "io-driver", "io-util", "process", "sync", "blocking", "macros"]
+version = "0.3.5"
+features = ["rt-multi-thread", "io-util", "process", "sync", "macros"]
 
 [build-dependencies]
-shaderc = "0.6.2"
+shaderc = "0.7.0"

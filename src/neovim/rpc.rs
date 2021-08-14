@@ -226,10 +226,11 @@ fn nvim_process() -> io::Result<(ChildStdin, ChildStdout)> {
         .envs(std::env::vars())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
 
-    log::info!("Spawned neovim process at PID {}", nvim.id());
+    log::info!("Spawned neovim process at PID {:?}", nvim.id());
 
     let stdin = nvim
         .stdin
@@ -243,9 +244,15 @@ fn nvim_process() -> io::Result<(ChildStdin, ChildStdout)> {
 
     tokio::spawn(async move {
         log::info!("Waiting for neovim process to finish");
-        match nvim.await {
+        match nvim.wait().await {
             Ok(status) => log::error!("neovim process exited with status {}", status),
             Err(error) => log::error!("neovim process exited with error: {}", error),
+        }
+
+        if let Some(stderr) = &mut nvim.stderr {
+            let mut buf = String::with_capacity(1024);
+            log::error!("{:?}", stderr.read_to_string(&mut buf).await);
+            log::error!("NVIM stderr: {}", buf);
         }
 
         std::process::exit(1);

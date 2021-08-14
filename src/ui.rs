@@ -1,4 +1,6 @@
-use crate::editor::UiStateFromEditor;
+use crate::color::Color;
+use crate::editor::{UiStateFromEditor, TripleBufferReader, UiEditorEvent};
+use crate::neovim::Neovim;
 use std::sync::Arc;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
@@ -14,17 +16,19 @@ use winit::window::{CursorIcon, Window, WindowBuilder};
 mod gpu;
 mod renderers;
 mod shaper;
+use self::renderers::Quad;
 
 pub struct Ui {
     gpu: Mutex<gpu::Gpu>,
     quad: Mutex<renderers::QuadRenderer>,
+    neovim: Mutex<Neovim>,
     window: UiWindow,
     input: UiInput,
 }
 
 impl Ui {
-    pub async fn new() -> (Arc<Ui>, UiEventLoop) {
-        let event_loop = EventLoop::new();
+    pub async fn new(neovim: Neovim) -> (Arc<Ui>, UiEventLoop) {
+        let event_loop = <EventLoop<UiEditorEvent>>::with_user_event();
         let window = UiWindow::build(&event_loop);
 
         let mut gpu = gpu::Gpu::new(&window).await;
@@ -33,6 +37,7 @@ impl Ui {
         let ui = Arc::new(Ui {
             gpu: Mutex::new(gpu),
             quad: Mutex::new(quad),
+            neovim: Mutex::new(neovim),
             window,
             input: Default::default(),
         });
@@ -43,6 +48,21 @@ impl Ui {
         };
 
         (ui, ui_event_loop)
+    }
+
+    fn render(&self) {
+        let mut gpu = self.gpu.lock().unwrap();
+        let (frame, mut encoder) = gpu.begin_render();
+        gpu.clear(&frame.view, &mut encoder, Color::BLACK);
+
+        {
+            let mut quad = self.quad.lock().unwrap();
+
+            quad.queue(Quad::new(0.25, 0.25, 0.5, 0.5, Color::WHITE));
+            quad.render_in(&frame.view, &mut encoder, &mut gpu);
+        }
+
+        gpu.finish_render(frame, encoder);
     }
 }
 
@@ -75,7 +95,7 @@ struct UiWindow {
 
 /// Window manipulation methods.
 impl UiWindow {
-    fn build(event_loop: &EventLoop<()>) -> Self {
+    fn build(event_loop: &EventLoop<UiEditorEvent>) -> Self {
         let builder = WindowBuilder::new()
             .with_resizable(true)
             .with_visible(false)
@@ -97,7 +117,7 @@ impl UiWindow {
 
         // Don't let the window extend past the window monitor.
         let monitor = winit_window.current_monitor();
-        winit_window.set_max_inner_size(Some(monitor.size()));
+        winit_window.set_max_inner_size(monitor.map(|m| m.size()));
 
         Self {
             winit_window,
@@ -182,7 +202,7 @@ impl WindowStatus {
 
 pub struct UiEventLoop {
     ui: Arc<Ui>,
-    event_loop: EventLoop<()>,
+    event_loop: EventLoop<UiEditorEvent>,
 }
 
 impl UiEventLoop {
@@ -194,13 +214,7 @@ impl UiEventLoop {
 
             match event {
                 Event::MainEventsCleared => ui.window.request_redraw(),
-                Event::RedrawRequested(_) => {
-                    let mut gpu = ui.gpu.lock().unwrap();
-                    let (frame, mut encoder) = gpu.begin_render(crate::color::Color::BLACK);
-
-                    ui.quad.lock().unwrap().render_in(&frame.view, &mut encoder);
-                    gpu.finish_render(frame, encoder);
-                }
+                Event::RedrawRequested(_) => ui.render(),
                 Event::WindowEvent { event, .. } => match event {
                     WindowEvent::Resized(new_physical_size) => {
                         // TODO: calculate margins to adjust window size to grid size.
